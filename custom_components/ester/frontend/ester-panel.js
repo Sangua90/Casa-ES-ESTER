@@ -5,6 +5,7 @@ class EsterPanel extends HTMLElement {
     this._hass = null;
     this._busy = false;
     this._tab = "overview";
+    this._decisionCategory = "all";
   }
 
   set hass(value) { this._hass = value; this.render(); }
@@ -14,6 +15,7 @@ class EsterPanel extends HTMLElement {
   state(id) { return this._hass?.states?.[id]; }
   summary() { return this.state("sensor.e_s_t_e_r_summary")?.attributes || {}; }
   latest() { return this.state("sensor.e_s_t_e_r_shadow_decisions")?.attributes?.latest || []; }
+  history() { return this.summary().decision_history || this.latest(); }
   questions() { return this.state("sensor.e_s_t_e_r_questions")?.attributes?.items || []; }
   migration() { return this.summary().migration_readiness || {}; }
   prefs() { return this.summary().preferences || {}; }
@@ -94,8 +96,50 @@ class EsterPanel extends HTMLElement {
     await this.call("ester", "import_memory", {memory_json});
   }
 
+  async saveRoutine() {
+    const area_id = this.shadowRoot?.querySelector("#routine-area")?.value?.trim();
+    const label = this.shadowRoot?.querySelector("#routine-label")?.value?.trim();
+    const weekdays = (this.shadowRoot?.querySelector("#routine-days")?.value || "")
+      .split(",").map(x=>Number(x.trim())).filter(x=>Number.isInteger(x) && x>=0 && x<=6);
+    const start_time = this.shadowRoot?.querySelector("#routine-start")?.value;
+    const end_time = this.shadowRoot?.querySelector("#routine-end")?.value;
+    const expected_occupancy = Number(this.shadowRoot?.querySelector("#routine-occ")?.value);
+    const comfort = this.shadowRoot?.querySelector("#routine-comfort")?.value;
+    if (!area_id || !label || !weekdays.length || !start_time || !end_time || !Number.isFinite(expected_occupancy)) return;
+    const data = {area_id,label,weekdays,start_time,end_time,expected_occupancy};
+    if (comfort !== "") data.comfort_c = Number(comfort);
+    await this.call("ester","set_usage_profile",data);
+  }
+
+  async removeRoutine(profile_id) {
+    await this.call("ester","remove_usage_profile",{profile_id});
+  }
+
+  async saveLoad() {
+    const name = this.shadowRoot?.querySelector("#load-name")?.value?.trim();
+    const entity_id = this.shadowRoot?.querySelector("#load-entity")?.value?.trim();
+    const power_w = Number(this.shadowRoot?.querySelector("#load-power")?.value);
+    const duration_minutes = Number(this.shadowRoot?.querySelector("#load-duration")?.value || 60);
+    const priority = Number(this.shadowRoot?.querySelector("#load-priority")?.value || 50);
+    const min_soc = Number(this.shadowRoot?.querySelector("#load-soc")?.value || 0);
+    const phase = this.shadowRoot?.querySelector("#load-phase")?.value || "unknown";
+    const min_on_minutes = Number(this.shadowRoot?.querySelector("#load-min-on")?.value || 0);
+    const min_off_minutes = Number(this.shadowRoot?.querySelector("#load-min-off")?.value || 0);
+    if (!name || !entity_id || !Number.isFinite(power_w)) return;
+    await this.call("ester","set_flexible_load",{
+      name,entity_id,power_w,duration_minutes,priority,min_soc,phase,min_on_minutes,min_off_minutes,
+      interruptible:true,non_interruptible:false
+    });
+  }
+
+  async removeLoad(load_id) {
+    await this.call("ester","remove_flexible_load",{load_id});
+  }
+
   decisionCards(items=null) {
-    const list = (items || this.latest()).slice().reverse().slice(0, 30);
+    let list = (items || this.history()).slice().reverse();
+    if (!items && this._decisionCategory !== "all") list = list.filter(x=>x.category===this._decisionCategory);
+    list = list.slice(0, 100);
     if (!list.length) return '<div class="empty">Nessuna decisione Shadow disponibile.</div>';
     return list.map(d => {
       const objective = d.evidence?.objective_score?.score;
@@ -275,11 +319,26 @@ class EsterPanel extends HTMLElement {
     `;
   }
 
+  forecastCard() {
+    const f = this.summary().daily_forecast || {};
+    const uses = f.next_uses || [];
+    return `
+      <article class="control">
+        <div class="eyebrow">DAILY HOME FORECAST</div>
+        <h3>${this.esc((f.season || "—").toUpperCase())} · ${this.pct(f.avg_recent_confidence)}</h3>
+        <p>Strategia energia: <b>${this.esc((f.energy_strategy || "—").replaceAll("_"," "))}</b> · Domande aperte: ${this.esc(f.open_questions ?? 0)} · Anomalie: ${this.esc(f.anomalies ?? 0)}</p>
+        ${uses.length ? '<div class="timeline">'+uses.slice(0,8).map(u=>`<div><b>${this.esc(u.area_id)}</b><span>${this.esc(u.label || "")} · tra ${this.esc(u.minutes_until)} min · ${u.comfort_c == null ? "—" : this.esc(u.comfort_c)+" °C"}</span></div>`).join("")+'</div>' : '<div class="empty">Nessun uso stanza previsto nelle prossime ore.</div>'}
+      </article>`;
+  }
+
   configView() {
     const weights = ["safety","comfort","cost","energy","equipment","confidence"];
     const defaults = {safety:1,comfort:.75,cost:.6,energy:.65,equipment:.55,confidence:.9};
     const prefs = this.prefs();
     const versions = this.summary().memory_versions || [];
+    const routines = this.summary().usage_profile_items || [];
+    const loads = this.summary().flexible_loads || [];
+    const gaps = this.state("sensor.e_s_t_e_r_data_suggestions")?.attributes?.items || [];
     return `
       <h2 class="section-title">PESI MULTI-OBIETTIVO</h2>
       <section class="grid">
@@ -293,6 +352,48 @@ class EsterPanel extends HTMLElement {
           </article>`).join("")}
       </section>
 
+      <h2 class="section-title">ROUTINE USO CASA</h2>
+      <article class="control">
+        <div class="form-grid">
+          <label>Area ID<input id="routine-area" placeholder="salotto"></label>
+          <label>Nome<input id="routine-label" placeholder="Salotto sera"></label>
+          <label>Giorni 0-6<input id="routine-days" placeholder="0,1,2,3,4"></label>
+          <label>Inizio<input id="routine-start" type="time"></label>
+          <label>Fine<input id="routine-end" type="time"></label>
+          <label>Probabilità uso<input id="routine-occ" type="number" min="0" max="1" step="0.05" value="0.9"></label>
+          <label>Comfort °C<input id="routine-comfort" type="number" min="5" max="35" step="0.5"></label>
+        </div>
+        <button id="routine-save">AGGIUNGI ROUTINE</button>
+      </article>
+      <section class="grid">
+        ${routines.length ? routines.map(r=>`
+          <article class="migration"><div class="eyebrow">${this.esc(r.area_id)} · ${this.esc((r.weekdays||[]).join(","))}</div>
+          <h3>${this.esc(r.label)}</h3><p>${this.esc(r.start_time)}–${this.esc(r.end_time)} · uso ${this.pct(r.expected_occupancy)} · comfort ${r.comfort_c ?? "—"} °C</p>
+          <button data-remove-routine="${this.esc(r.profile_id)}">RIMUOVI</button></article>`).join("") : '<div class="empty">Nessuna routine configurata.</div>'}
+      </section>
+
+      <h2 class="section-title">CARICHI ENERGETICI GESTITI</h2>
+      <article class="control">
+        <div class="form-grid">
+          <label>Nome<input id="load-name" placeholder="Boiler"></label>
+          <label>Entity ID<input id="load-entity" placeholder="switch.boiler"></label>
+          <label>Potenza W<input id="load-power" type="number" min="0"></label>
+          <label>Durata min<input id="load-duration" type="number" min="1" value="60"></label>
+          <label>Priorità 1-100<input id="load-priority" type="number" min="1" max="100" value="50"></label>
+          <label>SOC minimo<input id="load-soc" type="number" min="0" max="100" value="0"></label>
+          <label>Fase<select id="load-phase"><option>unknown</option><option>l1</option><option>l2</option><option>l3</option><option>three_phase</option></select></label>
+          <label>Min ON min<input id="load-min-on" type="number" min="0" value="0"></label>
+          <label>Min OFF min<input id="load-min-off" type="number" min="0" value="0"></label>
+        </div>
+        <button id="load-save">AGGIUNGI CARICO</button>
+      </article>
+      <section class="grid">
+        ${loads.length ? loads.map(l=>`
+          <article class="migration"><div class="eyebrow">${this.esc(l.phase)} · PRIORITÀ ${this.esc(l.priority)}</div>
+          <h3>${this.esc(l.name)}</h3><p>${this.esc(l.entity_id)} · ${this.esc(l.power_w)} W · SOC min ${this.esc(l.min_soc)}%</p>
+          <button data-remove-load="${this.esc(l.load_id)}">RIMUOVI</button></article>`).join("") : '<div class="empty">Nessun carico configurato.</div>'}
+      </section>
+
       <h2 class="section-title">MAPPATURA ENTITÀ</h2>
       <article class="control">
         <div class="form-grid">
@@ -302,6 +403,13 @@ class EsterPanel extends HTMLElement {
         </div>
         <button id="class-save">SALVA CLASSIFICAZIONE</button>
       </article>
+
+      <h2 class="section-title">DATI MANCANTI / WIZARD</h2>
+      <section class="grid">
+        ${gaps.length ? gaps.slice(0,30).map(g=>`
+          <article class="decision"><div class="eyebrow">${this.esc(g.area_name || g.area_id || "casa")}</div>
+          <h3>${this.esc(g.missing_data || g.title)}</h3><p>${this.esc(g.benefit)}</p><div class="proposal">${this.esc(g.next_step)}</div></article>`).join("") : '<div class="empty">Nessuna lacuna dati rilevata.</div>'}
+      </section>
 
       <h2 class="section-title">VERSIONI MEMORIA</h2>
       <article class="control">
@@ -342,6 +450,14 @@ class EsterPanel extends HTMLElement {
     if (snapshot) snapshot.onclick=()=>this.snapshot();
     const memoryImport = this.shadowRoot?.querySelector("#memory-import-send");
     if (memoryImport) memoryImport.onclick=()=>this.importMemory();
+    const routineSave = this.shadowRoot?.querySelector("#routine-save");
+    if (routineSave) routineSave.onclick=()=>this.saveRoutine();
+    this.shadowRoot?.querySelectorAll("[data-remove-routine]").forEach(el=>el.onclick=()=>this.removeRoutine(el.dataset.removeRoutine));
+    const loadSave = this.shadowRoot?.querySelector("#load-save");
+    if (loadSave) loadSave.onclick=()=>this.saveLoad();
+    this.shadowRoot?.querySelectorAll("[data-remove-load]").forEach(el=>el.onclick=()=>this.removeLoad(el.dataset.removeLoad));
+    const filter = this.shadowRoot?.querySelector("#decision-filter");
+    if (filter) filter.onchange=()=>{this._decisionCategory=filter.value;this.render();};
   }
 
   render() {
@@ -382,11 +498,14 @@ class EsterPanel extends HTMLElement {
           <div class="eyebrow">TEACH E.S.T.E.R.</div>
           <div class="teach-row"><textarea id="teach" placeholder="Es. Questo weekend siamo via. Ester oggi è a casa. La palestra la uso alle 19..."></textarea><button id="teach-send">${this._busy ? "..." : "INVIA"}</button></div>
         </section>
+        <h2 class="section-title">FORECAST CASA</h2>
+        ${this.forecastCard()}
         <h2 class="section-title">LIVE DECISION FEED</h2>
-        <section class="grid">${this.decisionCards()}</section>
+        <section class="grid">${this.decisionCards(this.latest())}</section>
       `;
     } else if (this._tab === "decisions") {
-      body = '<h2 class="section-title">DECISIONI SHADOW</h2><section class="grid">'+this.decisionCards()+'</section>';
+      const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety","model"];
+      body = '<h2 class="section-title">STORICO DECISIONI SHADOW</h2><article class="control"><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+x+'</option>').join("")+'</select></label></article><section class="grid">'+this.decisionCards()+'</section>';
     } else if (this._tab === "questions") {
       body = '<h2 class="section-title">QUESTION INBOX</h2><section class="grid">'+this.questionCards()+'</section>';
     } else if (this._tab === "energy") {
@@ -422,7 +541,7 @@ class EsterPanel extends HTMLElement {
         .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:13px}.decision,.question,.migration,.model,.energy-core{border:1px solid #1eddfc32;background:linear-gradient(145deg,#071923e8,#031017e8);border-radius:12px;padding:16px;box-shadow:inset 0 0 28px #00d9ff08}
         .decision-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.decision h3,.question h3,.migration h3,.model h3{margin:5px 0 10px;color:#e9fdff}.confidence{font-family:monospace;font-size:25px;color:#68efff}.meter{height:3px;background:#0e2a34;margin:8px 0 14px}.meter span{display:block;height:100%;background:#53edff;box-shadow:0 0 10px #2ae8ff}.decision p,.question p,.energy-core p,.control p,.health p{color:#9dc5cf;line-height:1.5}.proposal{padding:10px 12px;background:#06222c;border-left:2px solid #50e9ff;color:#c8f8ff;margin-top:12px}.meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:#4fa3b3;font-family:monospace;font-size:10px;margin-top:13px}
         .answer-row input{flex:1;min-width:180px}.energy-core{display:flex;align-items:center;gap:35px}.orb{width:150px;height:150px;border-radius:50%;border:1px solid #4dedff;display:grid;place-items:center;box-shadow:0 0 30px #00d9ff45,inset 0 0 35px #00d9ff25;flex:0 0 auto}.orb-core{width:48px;height:48px;border-radius:50%;background:#c9fbff;box-shadow:0 0 50px #16e5ff}.energy-data{flex:1}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metrics.compact b{font-size:19px}.status{font-family:monospace;color:#6ff6cb}.model pre{white-space:pre-wrap;max-height:310px;overflow:auto;color:#7eb9c5;font-size:11px}.empty{padding:30px;color:#6c9da8;border:1px dashed #1bd5ef35;border-radius:10px}
-        .health.ok{border-color:#5dffc16b}.health.warn{border-color:#ffc95d59}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:10px 0}.form-grid.one{grid-template-columns:1fr auto}.form-grid label{font-size:11px;color:#68c9da;letter-spacing:.08em}.form-grid label input{margin-top:5px}
+        .health.ok{border-color:#5dffc16b}.health.warn{border-color:#ffc95d59}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:10px 0}.form-grid.one{grid-template-columns:1fr auto}.form-grid label{font-size:11px;color:#68c9da;letter-spacing:.08em}.form-grid label input,.form-grid label select{margin-top:5px}.timeline{display:grid;gap:7px;margin-top:12px}.timeline div{display:flex;justify-content:space-between;gap:15px;padding:9px;border-bottom:1px solid #1cdff322}.timeline span{color:#7bbcca;font-size:12px}
         @media(max-width:800px){.shell{padding:10px}.hero{min-height:240px;gap:20px;padding:18px}.jarvis{width:115px;height:115px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
       </style>
       <div class="shell">
