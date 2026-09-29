@@ -656,7 +656,7 @@ class EsterPanel extends HTMLElement {
       const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety","model"];
       body = '<h2 class="section-title">STORICO DECISIONI SHADOW</h2><article class="control"><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+x+'</option>').join("")+'</select></label></article><section class="grid">'+this.decisionCards()+'</section>';
     } else if (this._tab === "questions") {
-      body = '<h2 class="section-title">QUESTION INBOX</h2><section class="grid">'+this.questionCards()+'</section>';
+      body = '<h2 class="section-title">QUESTION INBOX · DIMMI QUELLO CHE MANCA</h2><section class="question-stack">'+this.questionCards()+'</section>';
     } else if (this._tab === "energy") {
       body = '<h2 class="section-title">ENERGY MANAGER INTEGRATO</h2>'+this.energyCard()+
         '<h2 class="section-title">ULTIME DECISIONI ENERGIA</h2><section class="grid">'+
