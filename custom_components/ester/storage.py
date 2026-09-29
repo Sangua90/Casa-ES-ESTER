@@ -42,6 +42,7 @@ class EsterStorage:
             "memory_versions": [],
             "last_replay": {},
             "last_scenario": {},
+            "voice_question_id": None,
         }
 
     async def async_load(self) -> None:
