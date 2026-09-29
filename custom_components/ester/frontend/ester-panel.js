@@ -25,6 +25,52 @@ class EsterPanel extends HTMLElement {
     return !technical.some(x => title.includes(x) || action.includes(x));
   }
   realDecisions() { return this.history().filter(d => this.isTrueDecision(d)); }
+  friendlyGap(g) {
+    const raw = [g?.missing_data, g?.title, g?.benefit, g?.next_step].filter(Boolean).join(" ").toLowerCase();
+    const area = g?.area_name || g?.area_id || "casa";
+    if (raw.includes("solar") || raw.includes("fv") || raw.includes("fotovolta")) return {
+      title:"Non so ancora quale sensore misura il fotovoltaico",
+      why:"Mi serve per capire quanta energia stai producendo e se c'è surplus realmente disponibile.",
+      action:"Indica l'entità che rappresenta la potenza FV istantanea.",
+      area
+    };
+    if (raw.includes("load") || raw.includes("consumo") || raw.includes("casa")) return {
+      title:"Non so ancora quale sensore misura il consumo totale della casa",
+      why:"Mi serve per distinguere ciò che consuma la casa da ciò che viene caricato in batteria o preso dalla rete.",
+      action:"Indica l'entità che rappresenta il consumo totale istantaneo.",
+      area
+    };
+    if (raw.includes("grid") || raw.includes("rete") || raw.includes("import")) return {
+      title:"Non so ancora quale sensore rappresenta la rete elettrica",
+      why:"Mi serve per sapere quando stai prelevando energia e quanto margine hai prima del limite del contatore.",
+      action:"Indica l'entità della potenza rete/import.",
+      area
+    };
+    if (raw.includes("battery") || raw.includes("batter") || raw.includes("soc")) return {
+      title:"Mi manca un riferimento affidabile per la batteria",
+      why:"Mi serve per rispettare riserva, target di carica e disponibilità energetica reale.",
+      action:"Indica il sensore SOC e, se disponibile, la potenza batteria.",
+      area
+    };
+    if (raw.includes("temperature") || raw.includes("temperatura")) return {
+      title:"Mi manca una temperatura utile per questa zona",
+      why:"Senza una misura affidabile non posso imparare quanto velocemente la stanza si scalda o si raffredda.",
+      action:"Indica il sensore temperatura corretto per l'area.",
+      area
+    };
+    if (raw.includes("presence") || raw.includes("presenza") || raw.includes("occup")) return {
+      title:"Non ho abbastanza informazioni sulla presenza",
+      why:"Mi serve per evitare decisioni sbagliate su luci, clima e antifurto quando qualcuno è in casa ma non si muove.",
+      action:"Indica i sensori di presenza più affidabili per questa area.",
+      area
+    };
+    return {
+      title:g?.missing_data || g?.title || "Mi manca un'informazione",
+      why:g?.benefit || "Questo dato mi serve per rendere le decisioni più affidabili.",
+      action:g?.next_step || "Completa la configurazione richiesta.",
+      area
+    };
+  }
   questions() { return this.state("sensor.e_s_t_e_r_questions")?.attributes?.items || []; }
   migration() { return this.summary().migration_readiness || {}; }
   prefs() { return this.summary().preferences || {}; }
@@ -529,9 +575,13 @@ class EsterPanel extends HTMLElement {
 
       <h2 class="section-title">DATI MANCANTI / WIZARD</h2>
       <section class="grid">
-        ${gaps.length ? gaps.slice(0,30).map(g=>`
-          <article class="decision"><div class="eyebrow">${this.esc(g.area_name || g.area_id || "casa")}</div>
-          <h3>${this.esc(g.missing_data || g.title)}</h3><p>${this.esc(g.benefit)}</p><div class="proposal">${this.esc(g.next_step)}</div></article>`).join("") : '<div class="empty">Nessuna lacuna dati rilevata.</div>'}
+        ${gaps.length ? gaps.slice(0,30).map(g=>{ const f=this.friendlyGap(g); return `
+          <article class="decision data-gap">
+            <div class="eyebrow">DATO MANCANTE · ${this.esc(String(f.area).toUpperCase())}</div>
+            <h3>${this.esc(f.title)}</h3>
+            <div class="decision-section"><span>PERCHÉ MI SERVE</span><p>${this.esc(f.why)}</p></div>
+            <div class="decision-section"><span>COSA DEVI INDICARMI</span><strong>${this.esc(f.action)}</strong></div>
+          </article>`; }).join("") : '<div class="empty">Non vedo dati mancanti importanti in questo momento.</div>'}
       </section>
 
       <h2 class="section-title">VERSIONI MEMORIA</h2>
