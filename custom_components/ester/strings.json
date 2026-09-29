@@ -1,0 +1,14 @@
+{
+  "title": "E.S.T.E.R.",
+  "config": {
+    "step": {
+      "user": {
+        "title": "E.S.T.E.R.",
+        "description": "Everything Seems Totally Easy, Right?\n\nVersion 0.1 runs only in Shadow Mode. It observes and reasons, but never controls real devices."
+      }
+    },
+    "abort": {
+      "already_configured": "E.S.T.E.R. is already configured."
+    }
+  }
+}
