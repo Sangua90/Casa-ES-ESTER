@@ -226,6 +226,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 "decision_count": len(journal), "contexts": contexts, "usage": usage,
                 "questions": [q for q in data.get("questions", []) if q.get("status") == "open"],
                 "usage_profiles": data.get("usage_profiles", []),
+                "preferences": data.get("preferences", {}),
                 "history": {k: v for k, v in history.items() if k not in {"samples", "statistics"}},
                 "learning_entities": len(learning), "data_suggestions": suggestions,
                 "thermal_models": data.get("thermal_models", {}),
