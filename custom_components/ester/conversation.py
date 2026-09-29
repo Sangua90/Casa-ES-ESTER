@@ -9,6 +9,9 @@ from homeassistant.helpers import intent
 
 from .const import DOMAIN
 from .language_pipeline import interpret_and_store
+from .questions import apply_answer
+from .snapshots import create_snapshot
+from homeassistant.util import dt as dt_util
 
 PARALLEL_UPDATES = 0
 
@@ -36,7 +39,7 @@ class EsterConversationEntity(
             "name": "E.S.T.E.R.",
             "manufacturer": "Casa ES",
             "model": "Intelligent Home Manager",
-            "sw_version": "1.3.0",
+            "sw_version": "1.4.0",
         }
 
     @property
@@ -53,6 +56,33 @@ class EsterConversationEntity(
 
     async def _async_handle_message(self, user_input, chat_log):
         try:
+            voice_question_id = self.coordinator.storage.data.get("voice_question_id")
+            if voice_question_id:
+                async with self.coordinator.storage.lock:
+                    create_snapshot(
+                        self.coordinator.storage.data,
+                        dt_util.utcnow(),
+                        "Prima di risposta vocale",
+                        voice_question_id,
+                    )
+                    interpretation = apply_answer(
+                        self.coordinator.storage.data,
+                        voice_question_id,
+                        user_input.text,
+                        dt_util.utcnow(),
+                    )
+                    self.coordinator.storage.data["voice_question_id"] = None
+                    await self.coordinator.storage.async_save()
+                await self.coordinator.async_request_refresh()
+                speech = "Ho registrato la risposta alla domanda aperta. " + interpretation.get("summary", "")
+                response = intent.IntentResponse(language=user_input.language)
+                response.async_set_speech(speech)
+                return conversation.ConversationResult(
+                    response=response,
+                    conversation_id=user_input.conversation_id,
+                    continue_conversation=False,
+                )
+
             result = await interpret_and_store(
                 self.hass,
                 self.coordinator,

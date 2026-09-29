@@ -31,10 +31,22 @@ def evaluate_shadow_outcomes(decisions: list[dict], current_states: dict, now: d
         if not before:
             continue
         delta = sum(after) / len(after) - sum(before) / len(before)
+        prediction_error_c = None
+        strategies = evidence.get("strategies") or []
+        temp_ids = evidence.get("temperature_entity_ids") or []
+        wait = next((s for s in strategies if s.get("strategy") == "wait"), None)
+        actual_temps = [
+            float(current_states[i]) for i in temp_ids
+            if isinstance(current_states.get(i), (int, float))
+        ]
+        if wait and wait.get("predicted_temp_at_use") is not None and actual_temps:
+            actual = sum(actual_temps) / len(actual_temps)
+            prediction_error_c = round(actual - float(wait["predicted_temp_at_use"]), 2)
         decision["outcome"] = {
             "type": "shadow_observation",
             "observed_at": now.isoformat(),
             "delta": round(delta, 3),
+            "prediction_error_c": prediction_error_c,
             "causal_effect": "not_measurable_in_shadow_mode",
         }
         updated.append(decision)
@@ -57,3 +69,24 @@ def calibration(feedback: list[dict]) -> dict:
         score = (values["correct"] + 0.5 * values["partial"]) / total if total else None
         result[category] = {**values, "samples": total, "empirical_score": round(score, 3)}
     return result
+
+
+def calibrated_confidence(decision: dict, calibration_data: dict) -> dict:
+    """Calibrate confidence using category feedback without aggressive promotion."""
+    raw = max(0.0, min(1.0, float(decision.get("confidence", 0) or 0)))
+    category = decision.get("category")
+    empirical = calibration_data.get(category) or {}
+    samples = int(empirical.get("samples", 0) or 0)
+    score = empirical.get("empirical_score")
+    if samples < 5 or score is None:
+        return {"raw": raw, "calibrated": raw, "samples": samples, "empirical_score": score}
+    blended = 0.75 * raw + 0.25 * float(score)
+    if samples < 20:
+        blended = min(raw, blended)
+    calibrated = round(max(0.0, min(1.0, blended)), 3)
+    return {
+        "raw": round(raw, 3),
+        "calibrated": calibrated,
+        "samples": samples,
+        "empirical_score": float(score),
+    }

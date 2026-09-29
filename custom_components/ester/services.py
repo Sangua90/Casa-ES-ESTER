@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import json
+from zoneinfo import ZoneInfo
 from time import monotonic
 from uuid import uuid4
 
@@ -19,8 +21,13 @@ from .home import MODES, ROLES
 from .usage import validate_profile
 from .questions import apply_answer
 from .language_pipeline import interpret_and_store
+from .snapshots import create_snapshot, restore_snapshot, portable_memory
+from .replay import run_historical_replay
+from .scenario import simulate_scenario
+from .discovery import discover_entities
 
 TEXT = vol.All(cv.string, vol.Length(min=1, max=2000))
+LONG_TEXT = vol.All(cv.string, vol.Length(min=2, max=100000))
 SHORT = vol.All(cv.string, vol.Length(min=1, max=100))
 
 
@@ -34,6 +41,9 @@ def register_services(hass):
             raise ServiceValidationError("E.S.T.E.R. is not loaded")
         return entries[0].runtime_data
 
+    def checkpoint(coordinator, label, reason):
+        return create_snapshot(coordinator.storage.data, dt_util.utcnow(), label, reason)
+
     async def add_context(call):
         coordinator = runtime()
         now = dt_util.utcnow()
@@ -46,7 +56,10 @@ def register_services(hass):
                  "starts_at": start.isoformat(), "ends_at": end.isoformat(),
                  "notes": call.data.get("notes", ""), "source": "user"}
         async with coordinator.storage.lock:
-            await coordinator.storage.add_context_event(event)
+            checkpoint(coordinator, "Prima di aggiungere contesto", event["label"])
+            coordinator.storage.data.setdefault("context_events", []).append(event)
+            del coordinator.storage.data["context_events"][:-100]
+            await coordinator.storage.async_save()
         await coordinator.async_request_refresh()
 
     async def remove_context(call):
@@ -86,6 +99,7 @@ def register_services(hass):
             if area_registry.async_get(hass).async_get_area(call.data["area_id"]) is None:
                 raise ServiceValidationError("Unknown area")
         async with coordinator.storage.lock:
+            checkpoint(coordinator, "Prima di classificare entità", entity_id)
             coordinator.storage.data["classifications"][entity_id] = {k: v for k, v in call.data.items() if k != "entity_id"}
             await coordinator.storage.async_save()
         coordinator.history.last_read = None
@@ -114,6 +128,9 @@ def register_services(hass):
             or key.startswith("lux_on:") and 0 <= value <= 5000
             or key == "night_start_hour" and 0 <= value <= 23
             or key == "morning_hour" and 0 <= value <= 23
+            or key.startswith("objective_weight:") and 0 <= value <= 1
+            or key == "season_winter_below_c" and -30 <= value <= 30
+            or key == "season_summer_above_c" and 5 <= value <= 50
         )
         if not valid:
             raise ServiceValidationError(
@@ -122,10 +139,13 @@ def register_services(hass):
                 "battery_capacity_kwh, battery_target_soc, battery_target_hour_local, "
                 "base_load_w, grid_limit_w, inverter_limit_w, phase_limit_w, "
                 "hot_water_target_c, heat_pump_cop, boiler_efficiency, lux_on:<area>, "
-                "night_start_hour, morning_hour"
+                "night_start_hour, morning_hour, objective_weight:<name>, "
+                "season_winter_below_c, season_summer_above_c"
             )
         async with coordinator.storage.lock:
-            await coordinator.storage.set_preference(key, value)
+            checkpoint(coordinator, "Prima di modificare preferenza", key)
+            coordinator.storage.data.setdefault("preferences", {})[key] = value
+            await coordinator.storage.async_save()
         await coordinator.async_request_refresh()
 
     async def set_usage_profile(call):
@@ -152,6 +172,7 @@ def register_services(hass):
         if profile["comfort_c"] is not None and not 5 <= float(profile["comfort_c"]) <= 35:
             raise ServiceValidationError("comfort_c must be 5–35 °C")
         async with coordinator.storage.lock:
+            checkpoint(coordinator, "Prima di modificare routine", profile["label"])
             profiles = coordinator.storage.data.setdefault("usage_profiles", [])
             coordinator.storage.data["usage_profiles"] = [p for p in profiles if p.get("profile_id") != profile_id]
             coordinator.storage.data["usage_profiles"].append(profile)
@@ -176,6 +197,7 @@ def register_services(hass):
         if not answer:
             raise ServiceValidationError("Answer cannot be empty")
         async with coordinator.storage.lock:
+            checkpoint(coordinator, "Prima di apprendere risposta", question_id)
             try:
                 interpretation = apply_answer(coordinator.storage.data, question_id, answer, dt_util.utcnow())
             except KeyError:
@@ -185,6 +207,20 @@ def register_services(hass):
             await coordinator.storage.async_save()
         await coordinator.async_request_refresh()
         return {"question_id": question_id, "status": "answered", "interpretation": interpretation}
+
+    async def select_voice_question(call):
+        coordinator = runtime()
+        question_id = call.data["question_id"]
+        question = next(
+            (q for q in coordinator.storage.data.setdefault("questions", [])
+             if q.get("question_id") == question_id and q.get("status") == "open"),
+            None,
+        )
+        if question is None:
+            raise ServiceValidationError("Unknown or closed question")
+        async with coordinator.storage.lock:
+            coordinator.storage.data["voice_question_id"] = question_id
+            await coordinator.storage.async_save()
 
     async def dismiss_question(call):
         coordinator = runtime()
@@ -207,18 +243,7 @@ def register_services(hass):
 
     async def export_memory(call):
         coordinator = runtime()
-        data = coordinator.storage.data
-        return {
-            "version": 1,
-            "preferences": data.get("preferences", {}),
-            "classifications": data.get("classifications", {}),
-            "usage_profiles": data.get("usage_profiles", []),
-            "knowledge": data.get("knowledge", []),
-            "thermal_models": data.get("thermal_models", {}),
-            "calibration": data.get("calibration", {}),
-            "flexible_loads": data.get("flexible_loads", []),
-            "context_events": data.get("context_events", []),
-        }
+        return {"version": 1, **portable_memory(coordinator.storage.data)}
 
     async def set_flexible_load(call):
         coordinator = runtime()
@@ -248,6 +273,7 @@ def register_services(hass):
             "source": "user",
         }
         async with coordinator.storage.lock:
+            checkpoint(coordinator, "Prima di modificare carico energetico", item["name"])
             loads = coordinator.storage.data.setdefault("flexible_loads", [])
             coordinator.storage.data["flexible_loads"] = [x for x in loads if x.get("load_id") != item["load_id"]]
             coordinator.storage.data["flexible_loads"].append(item)
@@ -264,6 +290,91 @@ def register_services(hass):
             coordinator.storage.data["flexible_loads"] = [x for x in loads if x.get("load_id") != call.data["load_id"]]
             await coordinator.storage.async_save()
         await coordinator.async_request_refresh()
+
+    async def run_replay(call):
+        coordinator = runtime()
+        try:
+            return await run_historical_replay(
+                hass,
+                coordinator,
+                days=call.data.get("days", 7),
+                step_minutes=call.data.get("step_minutes", 30),
+            )
+        except RuntimeError as err:
+            raise ServiceValidationError(str(err)) from None
+
+    async def simulate(call):
+        coordinator = runtime()
+        now = dt_util.utcnow()
+        profiles = discover_entities(hass, coordinator.storage.data["classifications"])
+        result = simulate_scenario(
+            engine=coordinator.engine,
+            profiles=profiles,
+            data=coordinator.storage.data,
+            now=now,
+            local_tz=ZoneInfo(hass.config.time_zone),
+            mode=call.data.get("mode", "normal"),
+            area_id=call.data.get("area_id"),
+            comfort_delta_c=call.data.get("comfort_delta_c", 0),
+            energy_price_multiplier=call.data.get("energy_price_multiplier", 1),
+        )
+        async with coordinator.storage.lock:
+            coordinator.storage.data["last_scenario"] = result
+            await coordinator.storage.async_save()
+        await coordinator.async_request_refresh()
+        return result
+
+    async def snapshot_memory(call):
+        coordinator = runtime()
+        async with coordinator.storage.lock:
+            snap = create_snapshot(
+                coordinator.storage.data,
+                dt_util.utcnow(),
+                call.data.get("label", "Snapshot manuale"),
+                call.data.get("reason", "Creato manualmente"),
+            )
+            await coordinator.storage.async_save()
+        await coordinator.async_request_refresh()
+        return {k: snap[k] for k in ("snapshot_id", "created_at", "label", "reason")}
+
+    async def rollback_memory(call):
+        coordinator = runtime()
+        async with coordinator.storage.lock:
+            checkpoint(coordinator, "Prima del rollback", call.data["snapshot_id"])
+            try:
+                restored = restore_snapshot(coordinator.storage.data, call.data["snapshot_id"])
+            except KeyError:
+                raise ServiceValidationError("Unknown snapshot") from None
+            await coordinator.storage.async_save()
+        coordinator.history.last_read = None
+        await coordinator.async_request_refresh()
+        return {"restored_snapshot_id": restored["snapshot_id"], "label": restored["label"]}
+
+    async def import_memory(call):
+        coordinator = runtime()
+        try:
+            incoming = json.loads(call.data["memory_json"])
+        except json.JSONDecodeError:
+            raise ServiceValidationError("Invalid JSON") from None
+        if not isinstance(incoming, dict):
+            raise ServiceValidationError("Memory import must be an object")
+        allowed = set(portable_memory(coordinator.storage.data))
+        if any(key not in allowed and key != "version" for key in incoming):
+            raise ServiceValidationError("Import contains unsupported keys")
+        async with coordinator.storage.lock:
+            checkpoint(coordinator, "Prima dell'import memoria", "Import JSON")
+            for key in allowed:
+                if key in incoming:
+                    expected_dict = key in {"preferences", "classifications"}
+                    if expected_dict and not isinstance(incoming[key], dict):
+                        raise ServiceValidationError(f"{key} must be an object")
+                    if not expected_dict and not isinstance(incoming[key], list):
+                        raise ServiceValidationError(f"{key} must be a list")
+                    coordinator.storage.data[key] = incoming[key]
+            await coordinator.storage.async_save()
+        coordinator.history.last_read = None
+        await coordinator.async_request_refresh()
+        return {"imported": True, "keys": sorted(k for k in incoming if k in allowed)}
 
     async def evaluate_now(call):
         await runtime().async_request_refresh()
@@ -286,6 +397,16 @@ def register_services(hass):
                 "automation_migration": data.get("automation_migration", {}),
                 "migration_readiness": data.get("migration_readiness", {}),
                 "flexible_loads": coordinator.storage.data.get("flexible_loads", []),
+                "kpis": data.get("kpis", {}),
+                "autonomy_health": data.get("autonomy_health", {}),
+                "season": data.get("season", {}),
+                "anomalies": data.get("anomalies", []),
+                "last_replay": coordinator.storage.data.get("last_replay", {}),
+                "last_scenario": coordinator.storage.data.get("last_scenario", {}),
+                "memory_versions": [
+                    {k: s.get(k) for k in ("snapshot_id","created_at","label","reason")}
+                    for s in coordinator.storage.data.get("memory_versions", [])[-20:]
+                ],
                 "decisions": coordinator.storage.data["decisions"][-call.data.get("limit", 20):]}
 
     async def explain(call):
@@ -331,6 +452,7 @@ def register_services(hass):
         }),
         "remove_usage_profile": (remove_usage_profile, {vol.Required("profile_id"): SHORT}),
         "answer_question": (answer_question, {vol.Required("question_id"): SHORT, vol.Required("answer"): TEXT}),
+        "select_voice_question": (select_voice_question, {vol.Required("question_id"): SHORT}),
         "dismiss_question": (dismiss_question, {vol.Required("question_id"): SHORT}),
         "interpret_message": (interpret_message, {vol.Required("message"): TEXT}),
         "export_memory": (export_memory, {}),
@@ -356,10 +478,26 @@ def register_services(hass):
             vol.Optional("area_id"): SHORT,
         }),
         "remove_flexible_load": (remove_flexible_load, {vol.Required("load_id"): SHORT}),
+        "run_replay": (run_replay, {
+            vol.Optional("days", default=7): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+            vol.Optional("step_minutes", default=30): vol.All(vol.Coerce(int), vol.Range(min=30, max=240)),
+        }),
+        "simulate_scenario": (simulate, {
+            vol.Optional("mode", default="normal"): vol.In(MODES),
+            vol.Optional("area_id"): SHORT,
+            vol.Optional("comfort_delta_c", default=0): vol.All(vol.Coerce(float), vol.Range(min=-5, max=5)),
+            vol.Optional("energy_price_multiplier", default=1): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=10)),
+        }),
+        "snapshot_memory": (snapshot_memory, {
+            vol.Optional("label", default="Snapshot manuale"): SHORT,
+            vol.Optional("reason", default="Creato manualmente"): TEXT,
+        }),
+        "rollback_memory": (rollback_memory, {vol.Required("snapshot_id"): SHORT}),
+        "import_memory": (import_memory, {vol.Required("memory_json"): LONG_TEXT}),
         "evaluate": (evaluate_now, {}),
         "get_summary": (summary, {vol.Optional("limit", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=100))}),
         "explain_decision": (explain, {vol.Required("decision_id"): SHORT}),
     }
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
-            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "export_memory", "set_flexible_load"} else SupportsResponse.NONE)
+            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)

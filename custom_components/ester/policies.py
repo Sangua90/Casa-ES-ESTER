@@ -140,7 +140,8 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
                     emit("climate", "Uso stanza previsto", action, reason,
                          temps + climates + presence, risk="medium",
                          evidence={"target_c": use_target, "expected_use": expected,
-                                   "thermal_model": model, "strategies": strategies})
+                                   "thermal_model": model, "strategies": strategies,
+                                   "temperature_entity_ids": [p.entity_id for p in temps]})
             elif "vacation" in scope_modes:
                 emit("climate", "Modalità vacanza", "Valutare un profilo di mantenimento da concordare",
                      "La vacanza cambia il comfort richiesto, ma protezione antigelo e limiti tecnici restano da verificare.",

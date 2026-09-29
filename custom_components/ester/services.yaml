@@ -288,3 +288,82 @@ remove_flexible_load:
       name: "ID carico"
       selector:
         text: {}
+
+run_replay:
+  name: "Replay storico"
+  description: "Rigioca fino a 30 giorni di Recorder nel motore Shadow attuale. Non esegue azioni."
+  fields:
+    days:
+      name: "Giorni"
+      selector:
+        number:
+          min: 1
+          max: 30
+          mode: box
+    step_minutes:
+      name: "Passo minuti"
+      selector:
+        number:
+          min: 30
+          max: 240
+          mode: box
+
+simulate_scenario:
+  name: "Simula scenario"
+  description: "Simula un contesto senza salvarlo e senza comandare dispositivi."
+  fields:
+    mode:
+      name: "Modalità"
+      selector:
+        select:
+          options: ["normal", "vacation", "guests", "illness", "work_from_home"]
+    area_id:
+      name: "Area"
+      selector:
+        text: {}
+    comfort_delta_c:
+      name: "Variazione comfort °C"
+      selector:
+        number:
+          min: -5
+          max: 5
+          step: 0.5
+    energy_price_multiplier:
+      name: "Moltiplicatore costo energia"
+      selector:
+        number:
+          min: 0.1
+          max: 10
+          step: 0.1
+
+snapshot_memory:
+  name: "Crea snapshot memoria"
+  description: "Salva una versione ripristinabile delle configurazioni e conoscenze E.S.T.E.R."
+  fields:
+    label:
+      name: "Nome"
+      selector:
+        text: {}
+    reason:
+      name: "Motivo"
+      selector:
+        text: {}
+
+rollback_memory:
+  name: "Ripristina memoria"
+  description: "Ripristina uno snapshot; prima crea automaticamente un nuovo checkpoint."
+  fields:
+    snapshot_id:
+      name: "ID snapshot"
+      selector:
+        text: {}
+
+import_memory:
+  name: "Importa memoria"
+  description: "Importa un backup JSON E.S.T.E.R.; crea un checkpoint preventivo."
+  fields:
+    memory_json:
+      name: "JSON"
+      selector:
+        text:
+          multiline: true
