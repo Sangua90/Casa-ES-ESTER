@@ -1,0 +1,45 @@
+add_context:
+  name: Add context
+  description: Add a temporary or contextual fact for E.S.T.E.R. without controlling any device.
+  fields:
+    label:
+      name: Label
+      required: true
+      example: "Ester is home sick today"
+      selector:
+        text:
+    starts_at:
+      name: Starts at
+      selector:
+        text:
+    ends_at:
+      name: Ends at
+      selector:
+        text:
+    notes:
+      name: Notes
+      selector:
+        text:
+
+add_feedback:
+  name: Add decision feedback
+  description: Tell E.S.T.E.R. whether a shadow decision was correct.
+  fields:
+    decision_id:
+      name: Decision ID
+      required: true
+      selector:
+        text:
+    rating:
+      name: Rating
+      required: true
+      selector:
+        select:
+          options:
+            - correct
+            - wrong
+            - partial
+    comment:
+      name: Comment
+      selector:
+        text:
