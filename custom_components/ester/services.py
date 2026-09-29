@@ -101,11 +101,20 @@ def register_services(hass):
             or key == "gas_price_eur_m3" and 0 <= value <= 10
             or key == "battery_reserve_percent" and 0 <= value <= 100
             or key.startswith("climate_power_kw:") and 0 < value <= 30
+            or key == "battery_capacity_kwh" and 0 < value <= 500
+            or key == "battery_target_soc" and 0 <= value <= 100
+            or key == "battery_target_hour_local" and 0 <= value <= 23
+            or key == "base_load_w" and 0 <= value <= 50000
+            or key == "grid_limit_w" and 0 <= value <= 100000
+            or key == "inverter_limit_w" and 0 <= value <= 100000
+            or key == "phase_limit_w" and 0 <= value <= 50000
         )
         if not valid:
             raise ServiceValidationError(
                 "Supported: comfort:<area>, soil_min:<area>, energy_price_eur_kwh, "
-                "gas_price_eur_m3, battery_reserve_percent, climate_power_kw:<area>"
+                "gas_price_eur_m3, battery_reserve_percent, climate_power_kw:<area>, "
+                "battery_capacity_kwh, battery_target_soc, battery_target_hour_local, "
+                "base_load_w, grid_limit_w, inverter_limit_w, phase_limit_w"
             )
         async with coordinator.storage.lock:
             await coordinator.storage.set_preference(key, value)
@@ -199,8 +208,44 @@ def register_services(hass):
             "knowledge": data.get("knowledge", []),
             "thermal_models": data.get("thermal_models", {}),
             "calibration": data.get("calibration", {}),
+            "flexible_loads": data.get("flexible_loads", []),
             "context_events": data.get("context_events", []),
         }
+
+    async def set_flexible_load(call):
+        coordinator = runtime()
+        entity_id = call.data["entity_id"]
+        if hass.states.get(entity_id) is None:
+            raise ServiceValidationError("Unknown entity")
+        item = {
+            "load_id": call.data.get("load_id") or str(uuid4()),
+            "name": call.data["name"],
+            "entity_id": entity_id,
+            "power_w": float(call.data["power_w"]),
+            "duration_minutes": int(call.data.get("duration_minutes", 60)),
+            "priority": int(call.data.get("priority", 50)),
+            "min_soc": float(call.data.get("min_soc", 0)),
+            "interruptible": bool(call.data.get("interruptible", True)),
+            "area_id": call.data.get("area_id"),
+            "source": "user",
+        }
+        async with coordinator.storage.lock:
+            loads = coordinator.storage.data.setdefault("flexible_loads", [])
+            coordinator.storage.data["flexible_loads"] = [x for x in loads if x.get("load_id") != item["load_id"]]
+            coordinator.storage.data["flexible_loads"].append(item)
+            await coordinator.storage.async_save()
+        await coordinator.async_request_refresh()
+        return item
+
+    async def remove_flexible_load(call):
+        coordinator = runtime()
+        async with coordinator.storage.lock:
+            loads = coordinator.storage.data.setdefault("flexible_loads", [])
+            if not any(x.get("load_id") == call.data["load_id"] for x in loads):
+                raise ServiceValidationError("Unknown flexible load")
+            coordinator.storage.data["flexible_loads"] = [x for x in loads if x.get("load_id") != call.data["load_id"]]
+            await coordinator.storage.async_save()
+        await coordinator.async_request_refresh()
 
     async def evaluate_now(call):
         await runtime().async_request_refresh()
@@ -263,10 +308,22 @@ def register_services(hass):
         "dismiss_question": (dismiss_question, {vol.Required("question_id"): SHORT}),
         "interpret_message": (interpret_message, {vol.Required("message"): TEXT}),
         "export_memory": (export_memory, {}),
+        "set_flexible_load": (set_flexible_load, {
+            vol.Optional("load_id"): SHORT,
+            vol.Required("name"): SHORT,
+            vol.Required("entity_id"): cv.entity_id,
+            vol.Required("power_w"): vol.All(vol.Coerce(float), vol.Range(min=0, max=50000)),
+            vol.Optional("duration_minutes", default=60): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
+            vol.Optional("priority", default=50): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+            vol.Optional("min_soc", default=0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+            vol.Optional("interruptible", default=True): cv.boolean,
+            vol.Optional("area_id"): SHORT,
+        }),
+        "remove_flexible_load": (remove_flexible_load, {vol.Required("load_id"): SHORT}),
         "evaluate": (evaluate_now, {}),
         "get_summary": (summary, {vol.Optional("limit", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=100))}),
         "explain_decision": (explain, {vol.Required("decision_id"): SHORT}),
     }
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
-            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "export_memory"} else SupportsResponse.NONE)
+            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "export_memory", "set_flexible_load"} else SupportsResponse.NONE)
