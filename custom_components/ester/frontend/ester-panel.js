@@ -46,11 +46,41 @@ class EsterPanel extends HTMLElement {
     await this.call("ester", "interpret_message", {message});
   }
 
-  async answer(questionId) {
+  async answer(questionId, quickAnswer=null) {
     const el = this.shadowRoot?.querySelector("#answer-" + CSS.escape(questionId));
-    const answer = el?.value?.trim();
+    const answer = (quickAnswer ?? el?.value)?.trim();
     if (!answer) return;
     await this.call("ester", "answer_question", {question_id: questionId, answer});
+  }
+
+  startSpeech(targetId) {
+    const target = this.shadowRoot?.querySelector("#" + CSS.escape(targetId));
+    if (!target) return;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.lang = (this._hass?.language || "it").startsWith("it") ? "it-IT" : (this._hass?.language || "it-IT");
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      target.placeholder = "Sto ascoltando...";
+      recognition.onresult = (event) => {
+        let text = "";
+        for (let i=event.resultIndex;i<event.results.length;i++) text += event.results[i][0].transcript;
+        target.value = text.trim();
+      };
+      recognition.onerror = () => { target.placeholder = "Microfono non disponibile: scrivi oppure usa Assist"; };
+      recognition.onend = () => { if (!target.value) target.placeholder = "Scrivi o usa il microfono..."; };
+      recognition.start();
+      return;
+    }
+    if (this._hass?.auth?.external?.config?.hasAssist) {
+      this._hass.auth.external.fireMessage({
+        type:"assist/show",
+        payload:{pipeline_id:"preferred",start_listening:true}
+      });
+      return;
+    }
+    target.placeholder = "Il browser non supporta la dettatura. Usa Assist o scrivi la risposta.";
   }
 
   async replay(days) {
@@ -184,17 +214,30 @@ class EsterPanel extends HTMLElement {
   questionCards() {
     const items = this.questions().slice(0, 20);
     if (!items.length) return '<div class="empty">Nessuna domanda aperta.</div>';
-    return items.map(q => `
-      <article class="question">
-        <div class="eyebrow">INPUT REQUIRED · ${this.pct(q.confidence)}</div>
-        <h3>${this.esc(q.title)}</h3>
-        <p>${this.esc(q.prompt)}</p>
-        <div class="answer-row">
-          <input id="answer-${this.esc(q.question_id)}" placeholder="Scrivi la risposta..." />
-          <button data-answer="${this.esc(q.question_id)}">INVIA</button>
+    return items.map(q => {
+      const quick = q.quick_answers || [];
+      return `
+      <article class="question question-focus">
+        <div class="question-radar">
+          <div class="radar-ring rr1"></div><div class="radar-ring rr2"></div>
+          <div class="radar-value">${this.pct(q.confidence)}</div>
+        </div>
+        <div class="question-main">
+          <div class="eyebrow">${this.esc((q.category || "INPUT").toUpperCase())} · RISCHIO ${this.esc((q.risk || "—").toUpperCase())}</div>
+          <h3>${this.esc(q.display_title || q.title)}</h3>
+          <div class="question-block observed"><span>COSA HO VISTO</span><p>${this.esc(q.observed || q.reasoning || "Sto raccogliendo dati dalla casa.")}</p></div>
+          <div class="question-block ask"><span>COSA MI MANCA</span><p>${this.esc(q.display_prompt || q.prompt)}</p></div>
+          <div class="question-block why"><span>PERCHÉ TE LO CHIEDO</span><p>${this.esc(q.why_asking || "La risposta aumenta la sicurezza della decisione.")}</p></div>
+          <div class="hint">${this.esc(q.answer_hint || "Puoi rispondere con parole normali.")}</div>
+          ${quick.length ? '<div class="quick-row">'+quick.map(a=>`<button class="quick" data-quick-question="${this.esc(q.question_id)}" data-quick-answer="${this.esc(a)}">${this.esc(a)}</button>`).join("")+'</div>' : ''}
+          <div class="answer-row">
+            <input id="answer-${this.esc(q.question_id)}" placeholder="Scrivi o detta la risposta..." />
+            <button class="mic-btn" data-mic="answer-${this.esc(q.question_id)}" title="Parla">◉ MIC</button>
+            <button data-answer="${this.esc(q.question_id)}">CONFERMA</button>
+          </div>
         </div>
       </article>
-    `).join("");
+    `}).join("");
   }
 
   energyCard() {
@@ -459,6 +502,8 @@ class EsterPanel extends HTMLElement {
     const teach = this.shadowRoot?.querySelector("#teach-send");
     if (teach) teach.onclick = () => this.teach();
     this.shadowRoot?.querySelectorAll("[data-answer]").forEach(el => el.onclick=()=>this.answer(el.dataset.answer));
+    this.shadowRoot?.querySelectorAll("[data-quick-question]").forEach(el => el.onclick=()=>this.answer(el.dataset.quickQuestion, el.dataset.quickAnswer));
+    this.shadowRoot?.querySelectorAll("[data-mic]").forEach(el => el.onclick=()=>this.startSpeech(el.dataset.mic));
     this.shadowRoot?.querySelectorAll("[data-replay]").forEach(el => el.onclick=()=>this.replay(el.dataset.replay));
     this.shadowRoot?.querySelectorAll("[data-scenario]").forEach(el => el.onclick=()=>this.scenario(el.dataset.scenario));
     this.shadowRoot?.querySelectorAll("[data-weight]").forEach(el => el.onclick=()=>this.saveWeight(el.dataset.weight));
@@ -517,7 +562,11 @@ class EsterPanel extends HTMLElement {
         </section>
         <section class="teach">
           <div class="eyebrow">TEACH E.S.T.E.R.</div>
-          <div class="teach-row"><textarea id="teach" placeholder="Es. Questo weekend siamo via. Ester oggi è a casa. La palestra la uso alle 19..."></textarea><button id="teach-send">${this._busy ? "..." : "INVIA"}</button></div>
+          <div class="teach-row">
+            <textarea id="teach" placeholder="Parla o scrivi: «Questo weekend siamo via», «Ester oggi è a casa», «La palestra la uso alle 19»..."></textarea>
+            <button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button>
+            <button id="teach-send">${this._busy ? "..." : "INVIA"}</button>
+          </div>
         </section>
         <h2 class="section-title">FORECAST CASA</h2>
         ${this.forecastCard()}
@@ -559,11 +608,11 @@ class EsterPanel extends HTMLElement {
         .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}.stats>div,.metrics>div{padding:18px;border:1px solid #16d8ff35;background:#06151d9e;border-radius:10px}.stats b,.metrics b{display:block;font-size:28px;color:#d9fbff}.stats span,.metrics span{font-size:10px;letter-spacing:.14em;color:#55bdd0}
         .teach,.control,.health{border:1px solid #1eddfc40;background:#041219c8;border-radius:12px;padding:15px}.teach-row,.answer-row,.button-row{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
         textarea,input,select{width:100%;border:1px solid #25dffc44;background:#02090e;color:#dcfbff;border-radius:8px;padding:11px}.teach textarea,.control textarea{min-height:85px;resize:vertical}
-        .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:13px}.decision,.question,.migration,.model,.energy-core{border:1px solid #1eddfc32;background:linear-gradient(145deg,#071923e8,#031017e8);border-radius:12px;padding:16px;box-shadow:inset 0 0 28px #00d9ff08}
+        .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}.decision,.question,.migration,.model,.energy-core{position:relative;border:1px solid #63eaff42;background:linear-gradient(155deg,#07151bd9,#03080dd9);clip-path:polygon(0 12px,12px 0,calc(100% - 28px) 0,100% 28px,100% 100%,28px 100%,0 calc(100% - 28px));padding:18px;box-shadow:inset 0 0 38px #00d9ff0b}.decision:before,.question:before,.migration:before,.model:before{content:"";position:absolute;left:14px;top:0;width:70px;height:1px;background:#74efff;box-shadow:0 0 8px #26e7ff}
         .decision-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.decision h3,.question h3,.migration h3,.model h3{margin:5px 0 10px;color:#e9fdff}.confidence{font-family:monospace;font-size:25px;color:#68efff}.meter{height:3px;background:#0e2a34;margin:8px 0 14px}.meter span{display:block;height:100%;background:#53edff;box-shadow:0 0 10px #2ae8ff}.decision p,.question p,.energy-core p,.control p,.health p{color:#9dc5cf;line-height:1.5}.proposal{padding:10px 12px;background:#06222c;border-left:2px solid #50e9ff;color:#c8f8ff;margin-top:12px}.meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:#4fa3b3;font-family:monospace;font-size:10px;margin-top:13px}
-        .answer-row input{flex:1;min-width:180px}.energy-core{display:flex;align-items:center;gap:35px}.orb{width:150px;height:150px;border-radius:50%;border:1px solid #4dedff;display:grid;place-items:center;box-shadow:0 0 30px #00d9ff45,inset 0 0 35px #00d9ff25;flex:0 0 auto}.orb-core{width:48px;height:48px;border-radius:50%;background:#c9fbff;box-shadow:0 0 50px #16e5ff}.energy-data{flex:1}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metrics.compact b{font-size:19px}.status{font-family:monospace;color:#6ff6cb}.model pre{white-space:pre-wrap;max-height:310px;overflow:auto;color:#7eb9c5;font-size:11px}.empty{padding:30px;color:#6c9da8;border:1px dashed #1bd5ef35;border-radius:10px}
+        .answer-row input{flex:1;min-width:180px}.mic-btn{border-radius:999px;border-color:#69f2ff;box-shadow:0 0 14px #00d9ff44;background:radial-gradient(circle,#0b3444,#041018)}.big-mic{min-width:112px}.quick-row{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.quick{padding:7px 10px;font-size:11px}.question-focus{display:grid;grid-template-columns:120px 1fr;gap:18px;align-items:start}.question-radar{position:relative;width:108px;height:108px;border-radius:50%;border:1px solid #69efff99;display:grid;place-items:center;background:radial-gradient(circle,#0bdcff24 0,#031018 58%,transparent 59%);box-shadow:0 0 25px #00dcff22,inset 0 0 25px #00dcff18}.radar-ring{position:absolute;border:1px solid #43e8ff66;border-radius:50%}.rr1{inset:12%;border-style:dashed;animation:spin 9s linear infinite}.rr2{inset:28%;animation:spin 5s linear reverse infinite}.radar-value{font:700 20px monospace;color:#c9fbff;text-shadow:0 0 12px #56eaff}.question-block{margin:10px 0;padding:9px 12px;border-left:2px solid #28dff2;background:linear-gradient(90deg,#09202a88,transparent)}.question-block span{display:block;font-size:9px;letter-spacing:.18em;color:#49c6dc}.question-block p{margin:5px 0}.question-block.ask{border-left-color:#fff}.question-block.why{border-left-color:#6ff7d0}.hint{font-size:12px;color:#7db5c0;font-style:italic;margin:8px 0}.energy-core{display:flex;align-items:center;gap:35px}.orb{width:150px;height:150px;border-radius:50%;border:1px solid #4dedff;display:grid;place-items:center;box-shadow:0 0 30px #00d9ff45,inset 0 0 35px #00d9ff25;flex:0 0 auto}.orb-core{width:48px;height:48px;border-radius:50%;background:#c9fbff;box-shadow:0 0 50px #16e5ff}.energy-data{flex:1}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metrics.compact b{font-size:19px}.status{font-family:monospace;color:#6ff6cb}.model pre{white-space:pre-wrap;max-height:310px;overflow:auto;color:#7eb9c5;font-size:11px}.empty{padding:30px;color:#6c9da8;border:1px dashed #1bd5ef35;border-radius:10px}
         .health.ok{border-color:#5dffc16b}.health.warn{border-color:#ffc95d59}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:10px 0}.form-grid.one{grid-template-columns:1fr auto}.form-grid label{font-size:11px;color:#68c9da;letter-spacing:.08em}.form-grid label input,.form-grid label select{margin-top:5px}.timeline{display:grid;gap:7px;margin-top:12px}.timeline div{display:flex;justify-content:space-between;gap:15px;padding:9px;border-bottom:1px solid #1cdff322}.timeline span{color:#7bbcca;font-size:12px}
-        @media(max-width:800px){.shell{padding:10px}.hero{min-height:240px;gap:20px;padding:18px}.jarvis{width:115px;height:115px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
+        @media(max-width:800px){.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:240px;gap:20px;padding:18px}.jarvis{width:115px;height:115px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
       </style>
       <div class="shell">
         <nav>${tabs.map(([id,label])=>`<button data-tab="${id}" class="${this._tab===id?"active":""}">${label}</button>`).join("")}</nav>
