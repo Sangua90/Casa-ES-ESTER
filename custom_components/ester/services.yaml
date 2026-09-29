@@ -116,3 +116,77 @@ explain_decision:
       description: "ID decisione"
       selector:
         text: {}
+
+set_usage_profile:
+  name: "Profilo uso stanza"
+  description: "Salva come si prevede di usare una stanza; non comanda dispositivi."
+  fields:
+    profile_id:
+      name: "profile_id"
+      description: "Opzionale: riusa un ID esistente per aggiornare il profilo."
+      selector:
+        text: {}
+    area_id:
+      name: "area_id"
+      description: "ID area Home Assistant"
+      selector:
+        text: {}
+    label:
+      name: "label"
+      description: "Descrizione della routine, ad esempio Salotto weekend sera"
+      selector:
+        text: {}
+    weekdays:
+      name: "weekdays"
+      description: "Giorni in cui vale la routine"
+      selector:
+        select:
+          multiple: true
+          options:
+            - {label: "Lunedì", value: "0"}
+            - {label: "Martedì", value: "1"}
+            - {label: "Mercoledì", value: "2"}
+            - {label: "Giovedì", value: "3"}
+            - {label: "Venerdì", value: "4"}
+            - {label: "Sabato", value: "5"}
+            - {label: "Domenica", value: "6"}
+    start_time:
+      name: "start_time"
+      description: "HH:MM"
+      selector:
+        text: {}
+    end_time:
+      name: "end_time"
+      description: "HH:MM"
+      selector:
+        text: {}
+    expected_occupancy:
+      name: "expected_occupancy"
+      description: "Probabilità attesa da 0 a 1"
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.05
+          mode: slider
+    comfort_c:
+      name: "comfort_c"
+      description: "Comfort desiderato quando la routine è attiva"
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          mode: box
+    notes:
+      name: "notes"
+      selector:
+        text: {}
+remove_usage_profile:
+  name: "Rimuovi profilo uso"
+  description: "Rimuove una routine prevista usando il suo ID."
+  fields:
+    profile_id:
+      name: "profile_id"
+      selector:
+        text: {}

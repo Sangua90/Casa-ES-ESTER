@@ -9,8 +9,8 @@ E.S.T.E.R. osserva Home Assistant, costruisce un modello delle stanze e registra
 - Apprende trend descrittivi di temperatura, umidità, ACS e frequenze d'uso delle stanze.
 - Valuta clima, FV/consumi/batteria, ACS, ventilazione/deumidificazione, irrigazione, luci, presenza e segnali di sicurezza.
 - Registra confidence, rischio, impatto, motivazioni, evidenze, alternative e osservazioni successive. Le osservazioni successive **non** dimostrano l'effetto di una proposta mai eseguita.
-- Conserva preferenze, contesti a scadenza e feedback. Supporta vacanza, ospiti, malattia e lavoro da casa.
-- Espone sei sensori, otto servizi amministrativi e una dashboard di esempio.
+- Conserva preferenze, contesti a scadenza, profili persistenti d’uso previsto degli spazi e feedback. Supporta vacanza, ospiti, malattia e lavoro da casa.
+- Espone sei sensori, dieci servizi amministrativi e una dashboard di esempio.
 - Funziona localmente senza AI. Gemini è opzionale, sostituibile e usato solo quando richiedi una spiegazione.
 
 ## Installazione e aggiornamento dalla v0.1
@@ -54,6 +54,20 @@ data:
   areas:
     - studio
 ```
+Per insegnare invece una routine stabile, usa un profilo d'uso previsto:
+```yaml
+action: ester.set_usage_profile
+data:
+  area_id: salotto
+  label: Salotto weekend sera
+  weekdays: [5, 6]
+  start_time: "18:00"
+  end_time: "23:30"
+  expected_occupancy: 0.9
+  comfort_c: 21
+```
+I giorni sono 0=lunedì … 6=domenica. Il servizio restituisce un `profile_id`, che puoi riutilizzare per aggiornare il profilo o passare a `ester.remove_usage_profile`. Le routine sono aspettative, non presenza reale: contesti temporanei come vacanza hanno priorità nelle decisioni Shadow.
+
 Le date esplicite richiedono il fuso orario, ad esempio `2026-10-01T18:00:00+02:00`. `areas: []` indica tutta la casa. I modi sono `normal`, `vacation`, `guests`, `illness`, `work_from_home`. Per terminare prima usa `ester.remove_context` con `event_id`.
 
 `ester.get_summary` restituisce stanze, contesti, stato Recorder e ultime decisioni, con `limit` da 1 a 100. La risposta contiene gli ID per feedback e spiegazioni:

@@ -1,14 +1,11 @@
-## E.S.T.E.R. V1 — Shadow Mode
+## E.S.T.E.R. 1.1.0 — Shadow Mode + uso previsto degli spazi
 
-Aggiornamento installabile direttamente da HACS, senza copiare file manualmente.
+Aggiornamento installabile da HACS.
 
-- Storici Recorder e statistiche opzionali, modello stanze e trend descrittivi.
-- Motori Shadow per clima, energia, ACS, ventilazione, irrigazione, luci, presenza e sicurezza.
-- Contesti temporanei, feedback, registro decisioni e sei sensori.
-- Box «Come migliorare E.S.T.E.R.» con dati mancanti e suggerimenti sui sensori.
-- Gemini opzionale e disabilitato per impostazione predefinita.
+- Aggiunge profili persistenti per insegnare a E.S.T.E.R. come prevedi di usare ogni stanza: giorni, orari, probabilità d'uso e comfort.
+- Le routine vengono combinate con presenza reale, contesti temporanei e storico; vacanza/ospiti/malattia restano eccezioni separate.
+- Il motore clima può proporre in Shadow Mode una pre-climatizzazione fino a 90 minuti prima di un uso previsto.
+- Il riepilogo espone routine salvate e stato d'uso corrente/prossimo.
+- Restano inclusi Recorder/statistiche, motori Shadow, feedback, suggerimenti dati e Gemini opzionale.
 
 **Nessuna attuazione reale sui dispositivi.** Richiede Home Assistant 2026.9.4 o successivo.
-Dopo l'aggiornamento riavvia Home Assistant; conserva l'integrazione esistente e la sua memoria.
-
-Le release vengono pubblicate automaticamente solo dopo il superamento dei test su main.
