@@ -18,7 +18,7 @@ from .const import DOMAIN, EVENT_FEEDBACK
 from .home import MODES, ROLES
 from .usage import validate_profile
 from .questions import apply_answer
-from .conversation import interpret_and_store
+from .language_pipeline import interpret_and_store
 
 TEXT = vol.All(cv.string, vol.Length(min=1, max=2000))
 SHORT = vol.All(cv.string, vol.Length(min=1, max=100))
