@@ -17,6 +17,7 @@ from .ai.factory import create_provider
 from .const import DOMAIN, EVENT_FEEDBACK
 from .home import MODES, ROLES
 from .usage import validate_profile
+from .questions import interpret_answer
 
 TEXT = vol.All(cv.string, vol.Length(min=1, max=2000))
 SHORT = vol.All(cv.string, vol.Length(min=1, max=100))
@@ -139,6 +140,56 @@ def register_services(hass):
             await coordinator.storage.async_save()
         await coordinator.async_request_refresh()
 
+    async def answer_question(call):
+        coordinator = runtime()
+        question_id = call.data["question_id"]
+        answer = call.data["answer"].strip()
+        if not answer:
+            raise ServiceValidationError("Answer cannot be empty")
+        async with coordinator.storage.lock:
+            question = next((q for q in coordinator.storage.data.setdefault("questions", [])
+                             if q.get("question_id") == question_id), None)
+            if question is None:
+                raise ServiceValidationError("Unknown question")
+            if question.get("status") == "answered":
+                raise ServiceValidationError("Question already answered")
+            interpretation = interpret_answer(question, answer)
+            question["status"] = "answered"
+            question["answer"] = answer
+            question["interpretation"] = interpretation
+            question["updated_at"] = dt_util.utcnow().isoformat()
+            if interpretation["kind"] == "preference":
+                coordinator.storage.data.setdefault("preferences", {})[interpretation["key"]] = interpretation["value"]
+            else:
+                knowledge = coordinator.storage.data.setdefault("knowledge", [])
+                knowledge.append({
+                    "knowledge_id": str(uuid4()),
+                    "question_id": question_id,
+                    "category": interpretation.get("category"),
+                    "area_id": interpretation.get("area_id"),
+                    "text": interpretation.get("text", answer),
+                    "scope": interpretation.get("scope", "temporary"),
+                    "confidence": interpretation.get("confidence", 0.5),
+                    "created_at": dt_util.utcnow().isoformat(),
+                    "source": "user_answer",
+                })
+                del knowledge[:-500]
+            await coordinator.storage.async_save()
+        await coordinator.async_request_refresh()
+        return {"question_id": question_id, "status": "answered", "interpretation": interpretation}
+
+    async def dismiss_question(call):
+        coordinator = runtime()
+        async with coordinator.storage.lock:
+            question = next((q for q in coordinator.storage.data.setdefault("questions", [])
+                             if q.get("question_id") == call.data["question_id"]), None)
+            if question is None:
+                raise ServiceValidationError("Unknown question")
+            question["status"] = "dismissed"
+            question["updated_at"] = dt_util.utcnow().isoformat()
+            await coordinator.storage.async_save()
+        await coordinator.async_request_refresh()
+
     async def evaluate_now(call):
         await runtime().async_request_refresh()
 
@@ -150,6 +201,8 @@ def register_services(hass):
                 "contexts": data.get("contexts", []), "history": data.get("history", {}),
                 "data_suggestions": data.get("data_suggestions", []), "usage": data.get("usage", {}),
                 "usage_profiles": coordinator.storage.data.get("usage_profiles", []),
+                "questions": coordinator.storage.data.get("questions", [])[-100:],
+                "knowledge": coordinator.storage.data.get("knowledge", [])[-100:],
                 "decisions": coordinator.storage.data["decisions"][-call.data.get("limit", 20):]}
 
     async def explain(call):
@@ -194,10 +247,12 @@ def register_services(hass):
             vol.Optional("notes"): TEXT,
         }),
         "remove_usage_profile": (remove_usage_profile, {vol.Required("profile_id"): SHORT}),
+        "answer_question": (answer_question, {vol.Required("question_id"): SHORT, vol.Required("answer"): TEXT}),
+        "dismiss_question": (dismiss_question, {vol.Required("question_id"): SHORT}),
         "evaluate": (evaluate_now, {}),
         "get_summary": (summary, {vol.Optional("limit", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=100))}),
         "explain_decision": (explain, {vol.Required("decision_id"): SHORT}),
     }
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
-            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile"} else SupportsResponse.NONE)
+            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question"} else SupportsResponse.NONE)
