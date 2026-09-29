@@ -10,7 +10,7 @@ from .home import numeric_value
 
 _LOGGER = logging.getLogger(__name__)
 LEARN_ROLES = {"temperature", "humidity", "hot_water", "climate", "presence", "energy",
-               "solar_power", "load_power", "battery", "soil_moisture"}
+               "solar_power", "load_power", "grid_power", "battery_power", "phase_power", "battery", "pv_forecast_power", "pv_forecast_remaining_energy", "soil_moisture"}
 
 
 def sample_value(profile):

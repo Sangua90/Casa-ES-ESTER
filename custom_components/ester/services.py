@@ -18,6 +18,7 @@ from .const import DOMAIN, EVENT_FEEDBACK
 from .home import MODES, ROLES
 from .usage import validate_profile
 from .questions import apply_answer
+from .language_pipeline import interpret_and_store
 
 TEXT = vol.All(cv.string, vol.Length(min=1, max=2000))
 SHORT = vol.All(cv.string, vol.Length(min=1, max=100))
@@ -93,8 +94,36 @@ def register_services(hass):
     async def preference(call):
         coordinator = runtime()
         key, value = call.data["key"], call.data["value"]
-        if not (key.startswith("comfort:") and 5 <= value <= 35 or key.startswith("soil_min:") and 0 <= value <= 100):
-            raise ServiceValidationError("Supported keys: comfort:<area> (5–35 °C), soil_min:<area> (0–100 %)")
+        valid = (
+            key.startswith("comfort:") and 5 <= value <= 35
+            or key.startswith("soil_min:") and 0 <= value <= 100
+            or key == "energy_price_eur_kwh" and 0 <= value <= 5
+            or key == "gas_price_eur_m3" and 0 <= value <= 10
+            or key == "battery_reserve_percent" and 0 <= value <= 100
+            or key.startswith("climate_power_kw:") and 0 < value <= 30
+            or key == "battery_capacity_kwh" and 0 < value <= 500
+            or key == "battery_target_soc" and 0 <= value <= 100
+            or key == "battery_target_hour_local" and 0 <= value <= 23
+            or key == "base_load_w" and 0 <= value <= 50000
+            or key == "grid_limit_w" and 0 <= value <= 100000
+            or key == "inverter_limit_w" and 0 <= value <= 100000
+            or key == "phase_limit_w" and 0 <= value <= 50000
+            or key == "hot_water_target_c" and 35 <= value <= 70
+            or key == "heat_pump_cop" and 1 <= value <= 8
+            or key == "boiler_efficiency" and 0.5 <= value <= 1.1
+            or key.startswith("lux_on:") and 0 <= value <= 5000
+            or key == "night_start_hour" and 0 <= value <= 23
+            or key == "morning_hour" and 0 <= value <= 23
+        )
+        if not valid:
+            raise ServiceValidationError(
+                "Supported: comfort:<area>, soil_min:<area>, energy_price_eur_kwh, "
+                "gas_price_eur_m3, battery_reserve_percent, climate_power_kw:<area>, "
+                "battery_capacity_kwh, battery_target_soc, battery_target_hour_local, "
+                "base_load_w, grid_limit_w, inverter_limit_w, phase_limit_w, "
+                "hot_water_target_c, heat_pump_cop, boiler_efficiency, lux_on:<area>, "
+                "night_start_hour, morning_hour"
+            )
         async with coordinator.storage.lock:
             await coordinator.storage.set_preference(key, value)
         await coordinator.async_request_refresh()
@@ -169,6 +198,73 @@ def register_services(hass):
             await coordinator.storage.async_save()
         await coordinator.async_request_refresh()
 
+    async def interpret_message(call):
+        coordinator = runtime()
+        try:
+            return await interpret_and_store(hass, coordinator, call.data["message"])
+        except Exception:
+            raise HomeAssistantError("Natural-language interpretation failed; no memory was changed") from None
+
+    async def export_memory(call):
+        coordinator = runtime()
+        data = coordinator.storage.data
+        return {
+            "version": 1,
+            "preferences": data.get("preferences", {}),
+            "classifications": data.get("classifications", {}),
+            "usage_profiles": data.get("usage_profiles", []),
+            "knowledge": data.get("knowledge", []),
+            "thermal_models": data.get("thermal_models", {}),
+            "calibration": data.get("calibration", {}),
+            "flexible_loads": data.get("flexible_loads", []),
+            "context_events": data.get("context_events", []),
+        }
+
+    async def set_flexible_load(call):
+        coordinator = runtime()
+        entity_id = call.data["entity_id"]
+        if hass.states.get(entity_id) is None:
+            raise ServiceValidationError("Unknown entity")
+        item = {
+            "load_id": call.data.get("load_id") or str(uuid4()),
+            "name": call.data["name"],
+            "entity_id": entity_id,
+            "power_w": float(call.data["power_w"]),
+            "duration_minutes": int(call.data.get("duration_minutes", 60)),
+            "priority": int(call.data.get("priority", 50)),
+            "min_soc": float(call.data.get("min_soc", 0)),
+            "interruptible": bool(call.data.get("interruptible", True)),
+            "non_interruptible": bool(call.data.get("non_interruptible", False)),
+            "phase": call.data.get("phase", "unknown"),
+            "min_on_minutes": int(call.data.get("min_on_minutes", 0)),
+            "min_off_minutes": int(call.data.get("min_off_minutes", 0)),
+            "max_starts_per_day": int(call.data.get("max_starts_per_day", 99)),
+            "window_start": call.data.get("window_start"),
+            "window_end": call.data.get("window_end"),
+            "allow_grid_w": float(call.data.get("allow_grid_w", 0)),
+            "battery_discharge_limit_w": float(call.data.get("battery_discharge_limit_w", 0)),
+            "power_sensor": call.data.get("power_sensor"),
+            "area_id": call.data.get("area_id"),
+            "source": "user",
+        }
+        async with coordinator.storage.lock:
+            loads = coordinator.storage.data.setdefault("flexible_loads", [])
+            coordinator.storage.data["flexible_loads"] = [x for x in loads if x.get("load_id") != item["load_id"]]
+            coordinator.storage.data["flexible_loads"].append(item)
+            await coordinator.storage.async_save()
+        await coordinator.async_request_refresh()
+        return item
+
+    async def remove_flexible_load(call):
+        coordinator = runtime()
+        async with coordinator.storage.lock:
+            loads = coordinator.storage.data.setdefault("flexible_loads", [])
+            if not any(x.get("load_id") == call.data["load_id"] for x in loads):
+                raise ServiceValidationError("Unknown flexible load")
+            coordinator.storage.data["flexible_loads"] = [x for x in loads if x.get("load_id") != call.data["load_id"]]
+            await coordinator.storage.async_save()
+        await coordinator.async_request_refresh()
+
     async def evaluate_now(call):
         await runtime().async_request_refresh()
 
@@ -182,6 +278,14 @@ def register_services(hass):
                 "usage_profiles": coordinator.storage.data.get("usage_profiles", []),
                 "questions": coordinator.storage.data.get("questions", [])[-100:],
                 "knowledge": coordinator.storage.data.get("knowledge", [])[-100:],
+                "thermal_models": data.get("thermal_models", {}),
+                "ventilation_models": data.get("ventilation_models", {}),
+                "hot_water_models": data.get("hot_water_models", {}),
+                "occupancy_models": data.get("occupancy_models", {}),
+                "calibration": data.get("calibration", {}),
+                "automation_migration": data.get("automation_migration", {}),
+                "migration_readiness": data.get("migration_readiness", {}),
+                "flexible_loads": coordinator.storage.data.get("flexible_loads", []),
                 "decisions": coordinator.storage.data["decisions"][-call.data.get("limit", 20):]}
 
     async def explain(call):
@@ -228,10 +332,34 @@ def register_services(hass):
         "remove_usage_profile": (remove_usage_profile, {vol.Required("profile_id"): SHORT}),
         "answer_question": (answer_question, {vol.Required("question_id"): SHORT, vol.Required("answer"): TEXT}),
         "dismiss_question": (dismiss_question, {vol.Required("question_id"): SHORT}),
+        "interpret_message": (interpret_message, {vol.Required("message"): TEXT}),
+        "export_memory": (export_memory, {}),
+        "set_flexible_load": (set_flexible_load, {
+            vol.Optional("load_id"): SHORT,
+            vol.Required("name"): SHORT,
+            vol.Required("entity_id"): cv.entity_id,
+            vol.Required("power_w"): vol.All(vol.Coerce(float), vol.Range(min=0, max=50000)),
+            vol.Optional("duration_minutes", default=60): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
+            vol.Optional("priority", default=50): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+            vol.Optional("min_soc", default=0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+            vol.Optional("interruptible", default=True): cv.boolean,
+            vol.Optional("non_interruptible", default=False): cv.boolean,
+            vol.Optional("phase", default="unknown"): vol.In(["l1", "l2", "l3", "three_phase", "unknown"]),
+            vol.Optional("min_on_minutes", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
+            vol.Optional("min_off_minutes", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
+            vol.Optional("max_starts_per_day", default=99): vol.All(vol.Coerce(int), vol.Range(min=1, max=999)),
+            vol.Optional("window_start"): vol.Match(r"^(?:[01]\d|2[0-3]):[0-5]\d$"),
+            vol.Optional("window_end"): vol.Match(r"^(?:[01]\d|2[0-3]):[0-5]\d$"),
+            vol.Optional("allow_grid_w", default=0): vol.All(vol.Coerce(float), vol.Range(min=0, max=50000)),
+            vol.Optional("battery_discharge_limit_w", default=0): vol.All(vol.Coerce(float), vol.Range(min=0, max=50000)),
+            vol.Optional("power_sensor"): cv.entity_id,
+            vol.Optional("area_id"): SHORT,
+        }),
+        "remove_flexible_load": (remove_flexible_load, {vol.Required("load_id"): SHORT}),
         "evaluate": (evaluate_now, {}),
         "get_summary": (summary, {vol.Optional("limit", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=100))}),
         "explain_decision": (explain, {vol.Required("decision_id"): SHORT}),
     }
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
-            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question"} else SupportsResponse.NONE)
+            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "export_memory", "set_flexible_load"} else SupportsResponse.NONE)

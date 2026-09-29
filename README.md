@@ -1,17 +1,17 @@
 # E.S.T.E.R.
-**Everything Seems Totally Easy, Right? — V1.2 Shadow Mode**
+**Everything Seems Totally Easy, Right? — V1.3 Pre-Final Shadow**
 
 E.S.T.E.R. osserva Home Assistant, costruisce un modello delle stanze e registra proposte spiegabili. **Non contiene un esecutore, non chiama servizi dei dispositivi e non può abilitare l'attuazione.**
 
 ## Cosa fa
 - Scopre entità, aree e dispositivi; permette correzioni locali della classificazione.
 - Legge 24 ore di storico Recorder e 7 giorni di statistiche orarie quando disponibili, senza modificare il database.
-- Apprende trend descrittivi di temperatura, umidità, ACS e frequenze d'uso delle stanze.
-- Valuta clima, FV/consumi/batteria, ACS, ventilazione/deumidificazione, irrigazione, luci, presenza e segnali di sicurezza.
+- Apprende trend e modelli locali: risposta termica delle stanze, efficacia ventilazione, comportamento ACS e probabilità d'uso degli spazi.
+- Valuta clima, PDC vs gas, FV/consumi/rete/batteria/fasi, ACS, ventilazione, irrigazione, luci, presenza e antifurto in Shadow.
 - Registra confidence, rischio, impatto, motivazioni, evidenze, alternative e osservazioni successive. Le osservazioni successive **non** dimostrano l'effetto di una proposta mai eseguita.
 - Conserva preferenze, contesti a scadenza, profili persistenti d’uso previsto degli spazi e feedback. Supporta vacanza, ospiti, malattia e lavoro da casa.
 - Espone sensori diagnostici, un campo risposta interattivo, servizi amministrativi e una dashboard HUD.
-- Funziona localmente senza AI. Gemini è opzionale, sostituibile e usato solo quando richiedi una spiegazione.
+- Funziona localmente senza AI. Gemini è opzionale: interpreta linguaggio naturale quando il parser locale non basta e spiega decisioni; non calcola la strategia e non controlla dispositivi.
 
 ## Installazione e aggiornamento dalla v0.1
 Versione di riferimento: **Home Assistant Core 2026.9.4** (Linux, Python >=3.14.2). Non è necessario aggiornare Python separatamente in HA OS.
@@ -92,15 +92,20 @@ I sensori mostrano stato Shadow, entità osservate, dimensione del registro, dom
 
 Gli eventi `ester_decision`, `ester_question` e `ester_feedback` sono predisposti per automazioni di notifica. Non viene installata né attivata alcuna automazione: [esempio solo notifica](examples/notification.yaml). Non collegare questi eventi a comandi sui dispositivi se vuoi mantenere l'intero sistema in Shadow Mode.
 
-## Gemini opzionale
-Nelle opzioni dell'integrazione scegli `gemini`, inserisci la chiave API e il nome di un modello disponibile nel tuo account. Poi chiama `ester.explain_decision` con un `decision_id`. Vengono inviati a Google categoria, titolo, proposta, motivazione (incluse eventuali misure citate), confidence e rischio. Non vengono inviati inventario completo, ID entità, note dei contesti o attributi grezzi.
+## Conversazione e Assist
+La V1.3 espone un agente conversazionale Home Assistant **E.S.T.E.R.**. Puoi selezionarlo nella pipeline Assist. Testo e voce passano allo stesso router: prima interpretazione locale, poi Gemini solo se abilitato e necessario. L'agente non espone feature di controllo Home Assistant.
 
-Nessuna chiamata periodica: massimo una richiesta al minuto, timeout 25 secondi. Errori del provider non fermano l'osservazione. Selezionando `disabled`, la chiave viene rimossa dalle opzioni correnti e le spiegazioni restano locali. Eventuali backup precedenti mantengono le proprie copie.
+Puoi anche scrivere direttamente nell'entità `text.e_s_t_e_r_teach_e_s_t_e_r` oppure usare `ester.interpret_message`.
+
+## Gemini opzionale
+Nelle opzioni dell'integrazione scegli `gemini`, inserisci la chiave API e il nome di un modello disponibile nel tuo account. Gemini viene chiamato solo dopo un messaggio esplicito dell'utente quando l'interpretazione locale non è sufficientemente sicura, oppure da `ester.explain_decision`. Per il linguaggio riceve il testo e un contesto ridotto (ID aree ammessi e titoli di alcune domande aperte); per le spiegazioni riceve categoria, titolo, proposta, motivazione, confidence e rischio. Non vengono inviati inventario completo, ID entità, note dei contesti o attributi grezzi.
+
+Nessuna chiamata periodica. Le spiegazioni hanno un limite di una richiesta al minuto; le interpretazioni avvengono solo quando invii una frase. Timeout Gemini 25 secondi. Errori del provider non fermano l'osservazione. Selezionando `disabled`, la chiave viene rimossa dalle opzioni correnti e le spiegazioni restano locali. Eventuali backup precedenti mantengono le proprie copie.
 
 L'interfaccia astratta è in `ai/base.py`; il punto di sostituzione è `ai/factory.py`. L'AI produce solo testo, mai strumenti eseguibili né modifiche automatiche ai contesti.
 
 ## Limiti dichiarati
-Questa V1 implementa apprendimento statistico descrittivo e regole conservative, **non** un modello termico fisico calibrato, un previsore FV o un ottimizzatore economico. Confidence e impatto sono euristiche, non probabilità calibrate o risparmi misurati.
+La V1.3 implementa modelli empirici locali e planner deterministici. **Non** è ancora un modello termico fisico calibrato né un previsore FV proprietario: usa dati e forecast disponibili in Home Assistant e richiede validazione Shadow prima dell'autonomia. Confidence e impatto sono euristiche, non probabilità calibrate o risparmi misurati.
 
 Nessuna diagnosi sanitaria/impiantistica, modifica dei cicli antilegionella, gestione certificata di allarmi o identificazione delle persone. Una stanza senza movimento non viene dichiarata vuota. Dati mancanti o vecchi generano domande, non certezze.
 
@@ -118,4 +123,26 @@ Il nuovo box nella dashboard e il sensore Data suggestions mostrano dati mancant
 
 
 ## E.S.T.E.R. HUD
-La V1.2 include `examples/dashboard.yaml` con tre viste: CORE, QUESTIONS e LEARNING, più `examples/ester_hud_theme.yaml` per il tema scuro/ciano. Il pulsante microfono usa l'azione Assist nativa di Home Assistant; il campo risposta testuale è interno a E.S.T.E.R. e non controlla dispositivi.
+La V1.3 include `examples/dashboard.yaml` con viste CORE, QUESTIONS, LEARNING, ENERGY e MIGRATION, più `examples/ester_hud_theme.yaml` per il tema scuro/ciano. Il pulsante microfono usa l'azione Assist nativa di Home Assistant; il campo risposta testuale è interno a E.S.T.E.R. e non controlla dispositivi.
+
+
+## Migrazione da automazioni ed Energy Manager
+E.S.T.E.R. inventaria in sola lettura le automazioni Home Assistant e le raggruppa per energia, sicurezza, luci, clima, ventilazione, presenza e irrigazione. La pagina MIGRATION confronta il numero di decisioni Shadow, domande aperte e feedback.
+
+Lo stato `candidate_for_manual_migration` significa solo che una categoria può essere valutata per una disattivazione manuale delle vecchie automazioni. **E.S.T.E.R. non le disabilita automaticamente.**
+
+Il planner energia V1.3 è indipendente da Casa ES Energy Manager e può essere istruito con ruoli espliciti per FV, carico, rete, SOC e fasi, più carichi flessibili. Finché resta Shadow, Energy Manager e le automazioni attuali possono continuare a gestire fisicamente la casa mentre E.S.T.E.R. confronta le proprie decisioni.
+
+
+## Centro di controllo laterale
+La V1.3 registra una vera voce **E.S.T.E.R.** nel menu laterale di Home Assistant tramite un custom panel nativo. Non richiede di creare manualmente una dashboard Lovelace.
+
+Il centro di controllo include:
+- **CORE**: stato Shadow, nodi osservati, decisioni, domande e canale “Teach E.S.T.E.R.”;
+- **DECISIONI**: proposta, motivazione, confidence e rischio;
+- **DOMANDE**: Question Inbox con risposta diretta;
+- **ENERGIA**: strategia energetica locale, FV, casa, SOC, surplus e decisioni sui carichi;
+- **APPRENDIMENTO**: modelli termici, ventilazione, ACS e occupazione;
+- **MIGRAZIONE**: stato delle automazioni legacy e prontezza alla sostituzione manuale.
+
+Il pannello è amministrativo e non abilita attuazione reale.

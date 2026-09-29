@@ -28,6 +28,17 @@ class EsterStorage:
             "usage_profiles": [],
             "questions": [],
             "knowledge": [],
+            "room_thermal_samples": {},
+            "thermal_models": {},
+            "calibration": {},
+            "flexible_loads": [],
+            "ventilation_samples": {},
+            "ventilation_models": {},
+            "hot_water_samples": {},
+            "hot_water_models": {},
+            "occupancy_samples": {},
+            "occupancy_models": {},
+            "energy_runtime": {},
         }
 
     async def async_load(self) -> None:

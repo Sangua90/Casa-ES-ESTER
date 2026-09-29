@@ -1,12 +1,26 @@
-## E.S.T.E.R. 1.2.0 — Question Inbox + HUD
+## E.S.T.E.R. 1.3.0 — Pre-Final Shadow
 
-- Inbox persistente delle domande con ID, stato, confidence, rischio e collegamento alla decisione.
-- Nuovo campo Home Assistant "Answer current question" per rispondere direttamente dalla dashboard.
-- Le risposte chiare possono diventare memoria strutturata (per esempio comfort stanza); quelle ambigue restano conoscenza e non creano regole automatiche.
-- Le domande già risposte o ignorate non vengono riproposte immediatamente.
-- Dashboard E.S.T.E.R. HUD scura/ciano con CORE, QUESTIONS e LEARNING.
-- Pulsante microfono basato sull'azione Assist nativa di Home Assistant.
-- Tema E.S.T.E.R. HUD incluso come esempio.
-- Restano Recorder, uso previsto degli spazi, Shadow decisions, feedback e Gemini opzionale.
+Versione pensata per portare il cervello di E.S.T.E.R. vicino alla futura modalità autonoma, mantenendo **zero attuazione reale**.
 
-**Nessuna attuazione reale sui dispositivi.** Home Assistant 2026.9.4 o successivo.
+- Agente conversazionale nativo Home Assistant selezionabile in Assist.
+- Parser locale + Gemini opzionale per interpretare preferenze, contesti, routine e note.
+- Gemini non decide dispositivi: i calcoli restano locali e deterministici.
+- Modello termico empirico per stanza e pre-climatizzazione predittiva.
+- Modello di occupazione per giorno/ora combinato con routine dichiarate.
+- Apprendimento dell'efficacia della ventilazione.
+- Modello ACS locale di calo/recupero.
+- Confronto economico PDC/gas con tariffe e COP configurabili.
+- Planner energia locale con FV, carico, rete, SOC, target batteria, riserva, limiti inverter/fasi e forecast.
+- Carichi flessibili con potenza, durata, priorità, SOC minimo e interrompibilità.
+- Outcome learning e calibrazione da feedback.
+- Inventario automazioni legacy e stato di prontezza alla migrazione per categoria.
+- Planner Shadow per luci e antifurto.
+- Export della memoria E.S.T.E.R.
+- Centro di controllo nativo nel menu laterale di Home Assistant, stile JARVIS, con CORE, DECISIONI, DOMANDE, ENERGIA, APPRENDIMENTO e MIGRAZIONE.
+- Gestione carichi energia con fase, priorità, SOC minimo, finestre orarie, tempi minimi ON/OFF, massimo avvii e non-interrompibilità.
+
+Le automazioni esistenti e Casa ES Energy Manager **non vengono modificati o disattivati**. La migrazione resta manuale e progressiva.
+
+**Ultimo passo futuro:** introdurre un executor controllato e togliere Shadow per domini validati. Questa release non contiene tale executor.
+
+Richiede Home Assistant 2026.9.4 o successivo.

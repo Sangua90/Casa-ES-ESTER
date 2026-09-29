@@ -37,10 +37,16 @@ views:
             entity: sensor.e_s_t_e_r_observed_entities
             name: OBSERVED NODES
             icon: mdi:access-point-network
+      - type: entities
+        theme: E.S.T.E.R. HUD
+        title: TEACH CHANNEL
+        entities:
+          - entity: text.e_s_t_e_r_teach_e_s_t_e_r
+            name: Insegna a E.S.T.E.R.
       - type: shortcut
         theme: E.S.T.E.R. HUD
         label: TALK TO E.S.T.E.R.
-        description: Apre Assist con ascolto vocale
+        description: Apre Assist. Seleziona E.S.T.E.R. come agente della pipeline vocale.
         icon: mdi:microphone
         color: cyan
         tap_action:
@@ -145,3 +151,84 @@ views:
           {% else %}
           Nessuna lacuna rilevata dai controlli attuali.
           {% endfor %}
+
+  - title: ENERGY
+    path: energy
+    icon: mdi:solar-power-variant
+    cards:
+      - type: markdown
+        theme: E.S.T.E.R. HUD
+        content: |
+          # ENERGY CORE
+          Planner energetico locale Shadow.
+          FV, carico casa, rete, batteria, limiti e carichi flessibili vengono valutati localmente.
+      - type: markdown
+        theme: E.S.T.E.R. HUD
+        title: LATEST ENERGY PLAN
+        content: >-
+          {% set decisions = state_attr('sensor.e_s_t_e_r_shadow_decisions', 'latest') or [] %}
+          {% set ns = namespace(found=false) %}
+          {% for item in decisions | reverse %}
+            {% if not ns.found and item.category == 'energy' %}
+              {% set ns.found = true %}
+              **{{ item.title }}**
+
+              {{ item.reasoning }}
+
+              **Proposta:** {{ item.proposed_action }}
+
+              {% set p = item.evidence.energy_plan or {} %}
+              {% if p %}
+              FV {{ p.pv_w | default('?') }} W · Casa {{ p.load_w | default('?') }} W ·
+              SOC {{ p.battery_soc | default('?') }}% ·
+              Surplus {{ p.instant_surplus_w | default('?') }} W
+
+              Strategia: `{{ p.strategy }}`
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {% if not ns.found %}Nessun piano energia recente.{% endif %}
+      - type: markdown
+        theme: E.S.T.E.R. HUD
+        title: FLEXIBLE LOADS
+        content: |
+          I carichi flessibili vengono classificati e ordinati da E.S.T.E.R., ma in Shadow non viene inviato alcun comando.
+
+          Configurazione: `ester.set_flexible_load`
+
+  - title: MIGRATION
+    path: migration
+    icon: mdi:source-branch-sync
+    cards:
+      - type: markdown
+        theme: E.S.T.E.R. HUD
+        content: |
+          # AUTOMATION MIGRATION
+          Le automazioni esistenti restano attive.
+          E.S.T.E.R. valuta in parallelo e indica quando una categoria è candidata a una sostituzione manuale.
+      - type: markdown
+        theme: E.S.T.E.R. HUD
+        title: READINESS
+        content: >-
+          {% set items = state_attr('sensor.e_s_t_e_r_summary', 'migration_readiness') or {} %}
+          {% for category, item in items.items() %}
+          **{{ category | upper }}** · `{{ item.status }}`
+
+          Legacy: {{ item.legacy_automations }} · Decisioni Shadow: {{ item.shadow_decisions_checked }} ·
+          Domande aperte: {{ item.open_questions }}
+
+          {% if item.empirical_feedback_score is not none %}
+          Feedback empirico: {{ (item.empirical_feedback_score * 100) | round }}%
+          {% endif %}
+
+          ---
+          {% else %}
+          Nessuna automazione legacy classificata.
+          {% endfor %}
+      - type: markdown
+        theme: E.S.T.E.R. HUD
+        title: SAFETY GATE
+        content: |
+          `automatic_disable_allowed = false`
+
+          Anche quando una categoria raggiunge **candidate_for_manual_migration**, E.S.T.E.R. non disattiva nessuna automazione da sola.

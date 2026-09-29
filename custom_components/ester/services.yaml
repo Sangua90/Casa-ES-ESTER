@@ -81,7 +81,7 @@ classify_entity:
         text: {}
 set_preference:
   name: "Preferenza"
-  description: "Imposta comfort:<area> in °C o soil_min:<area> in percentuale."
+  description: "Imposta preferenze locali: comfort, energia, batteria, limiti, ACS, COP, luce e orari antifurto."
   fields:
     key:
       name: "key"
@@ -210,5 +210,81 @@ dismiss_question:
   fields:
     question_id:
       name: "ID domanda"
+      selector:
+        text: {}
+
+interpret_message:
+  name: "Insegna a E.S.T.E.R."
+  description: "Interpreta una frase come memoria, contesto, preferenza o routine. Non comanda dispositivi."
+  fields:
+    message:
+      name: "Messaggio"
+      selector:
+        text:
+          multiline: true
+
+export_memory:
+  name: "Esporta memoria"
+  description: "Restituisce la memoria portabile di E.S.T.E.R. senza lo storico grezzo Recorder."
+
+set_flexible_load:
+  name: "Carico flessibile"
+  description: "Registra o aggiorna un carico pianificabile; in Shadow non viene comandato."
+  fields:
+    load_id:
+      name: "ID carico"
+      selector:
+        text: {}
+    name:
+      name: "Nome"
+      selector:
+        text: {}
+    entity_id:
+      name: "Entità"
+      selector:
+        entity: {}
+    power_w:
+      name: "Potenza stimata W"
+      selector:
+        number:
+          min: 0
+          max: 50000
+          mode: box
+    duration_minutes:
+      name: "Durata tipica minuti"
+      selector:
+        number:
+          min: 1
+          max: 1440
+          mode: box
+    priority:
+      name: "Priorità"
+      description: "1 = massima, 100 = minima"
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+    min_soc:
+      name: "SOC minimo"
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: box
+    interruptible:
+      name: "Interrompibile"
+      selector:
+        boolean: {}
+    area_id:
+      name: "Area"
+      selector:
+        text: {}
+
+remove_flexible_load:
+  name: "Rimuovi carico flessibile"
+  fields:
+    load_id:
+      name: "ID carico"
       selector:
         text: {}
