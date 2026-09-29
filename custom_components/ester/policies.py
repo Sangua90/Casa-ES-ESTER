@@ -7,6 +7,7 @@ from .home import number, numeric_value, timestamp
 from .models import ImpactLevel, RiskLevel
 from .thermal import compare_climate_strategies
 from .energy import energy_plan, rank_flexible_loads
+from .house_controls import lighting_plan, alarm_plan
 
 
 def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None, thermal_models=None, flexible_loads=None, local_tz=None):
@@ -122,12 +123,33 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
                      "Umidità relativa oltre 65%; senza umidità assoluta esterna non si può stabilire che aprire le finestre aiuti.",
                      [p] + [x for x in local if x.role == "ventilation"], risk="medium",
                      question="Sono disponibili condizioni esterne e limiti di rumore della stanza?")
-        lights = [p for p in local if p.role == "lighting" and p.state == "on"]
-        if lights and absent:
-            protected = scope_modes & {"guests", "illness", "work_from_home"}
-            emit("lighting", "Luci senza presenza rilevata", "Verificare prima di ipotizzare lo spegnimento",
-                 "Assenza di movimento non equivale a stanza vuota." + (" Il contesto richiede comfort protetto." if protected else ""),
-                 lights + presence, question="La stanza è davvero vuota o qualcuno è fermo, ospite o sta riposando?")
+        lights_all = [p for p in local if p.role == "lighting"]
+        lux = [p for p in local if p.role == "illuminance" and numeric_value(p) is not None]
+        if lights_all:
+            light_on = any(p.state == "on" for p in lights_all)
+            lux_value = sum(numeric_value(p) for p in lux) / len(lux) if lux else None
+            plan = lighting_plan(
+                light_on=light_on,
+                occupied=occupied or expected_now >= 0.5,
+                presence_known=bool(presence),
+                illuminance_lux=lux_value,
+                lux_threshold=number(preferences.get(f"lux_on:{area}")) or 80,
+            )
+            if plan["strategy"] == "would_turn_off":
+                protected = scope_modes & {"guests", "illness", "work_from_home"}
+                emit(
+                    "lighting", "Luce potenzialmente non necessaria", "Avrei spento la luce",
+                    plan["reason"] + (" Contesto protetto attivo." if protected else ""),
+                    lights_all + presence + lux,
+                    question="La stanza è davvero vuota o qualcuno è fermo, ospite o sta riposando?",
+                    evidence={"lighting_plan": plan},
+                )
+            elif plan["strategy"] == "would_turn_on":
+                emit(
+                    "lighting", "Illuminazione utile", "Avrei acceso la luce",
+                    plan["reason"], lights_all + presence + lux,
+                    evidence={"lighting_plan": plan},
+                )
         if presence:
             emit("presence", "Uso stanza osservato", "Continuare a imparare gli orari di utilizzo",
                  "Le frequenze per ora locale sono descrittive; non identificano persone e non garantiscono presenza futura.", presence,
@@ -218,6 +240,50 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
     if any(p.role == "irrigation" for p in valid) and not any(p.role == "soil_moisture" for p in valid):
         emit("irrigation", "Dati irrigazione mancanti", "Associare sensori terreno e pioggia", "Una valvola da sola non misura il bisogno d'acqua.",
              question="Quali sensori descrivono terreno e pioggia?")
+    alarm_panels = [p for p in valid if p.domain == "alarm_control_panel"]
+    presence_all = [p for p in valid if p.role == "presence" and p.domain in {"binary_sensor", "person", "device_tracker"}]
+    door_open = any(
+        p.domain == "binary_sensor" and p.role == "security" and p.state == "on"
+        and p.device_class in {"door", "window", "opening"}
+        for p in valid
+    )
+    occupied_house = any(
+        (p.domain == "binary_sensor" and p.state == "on")
+        or (p.domain in {"person", "device_tracker"} and p.state == "home")
+        for p in presence_all
+    )
+    presence_known = bool(presence_all)
+    expected_house = max(
+        [float(u.get("expected_occupancy", 0) or 0) for u in usage.values()] or [0]
+    )
+    if alarm_panels:
+        alarm = alarm_panels[0]
+        local_hour = (now.astimezone(local_tz).hour if local_tz else now.hour)
+        ap = alarm_plan(
+            alarm_state=alarm.state,
+            occupied=occupied_house,
+            presence_known=presence_known,
+            expected_occupancy=expected_house,
+            doors_open=door_open,
+            local_hour=local_hour,
+            vacation="vacation" in modes,
+            guests="guests" in modes,
+            night_start_hour=int(number(preferences.get("night_start_hour")) or 22),
+            morning_hour=int(number(preferences.get("morning_hour")) or 7),
+        )
+        if ap["strategy"] != "hold":
+            emit(
+                "security",
+                "Piano antifurto Shadow",
+                ap["strategy"].replace("would_", "Avrei ").replace("_", " "),
+                ap["reason"],
+                [alarm] + presence_all,
+                risk="high",
+                impact="high",
+                question="Confermi che questa logica antifurto corrisponde a come vuoi usare la casa?",
+                evidence={"alarm_plan": ap},
+            )
+
     for p in [p for p in valid if p.role == "security"]:
         if (p.domain == "binary_sensor" and p.state == "on") or p.state in {"triggered", "jammed"}:
             emit("operational_safety", "Segnale di sicurezza attivo", "Richiedere verifica umana del segnale",
