@@ -39,6 +39,9 @@ class EsterStorage:
             "occupancy_samples": {},
             "occupancy_models": {},
             "energy_runtime": {},
+            "memory_versions": [],
+            "last_replay": {},
+            "last_scenario": {},
         }
 
     async def async_load(self) -> None:
