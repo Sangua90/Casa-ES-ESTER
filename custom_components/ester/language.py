@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from uuid import uuid4
 
+from .usage import validate_profile
+
 ALLOWED_INTENTS = {"preference", "context", "usage_profile", "knowledge_note", "feedback", "unknown"}
 ALLOWED_MODES = {"normal", "vacation", "guests", "illness", "work_from_home"}
 
@@ -81,8 +83,12 @@ def apply_interpretation(store: dict, parsed: dict, now: datetime) -> dict:
                 "notes": parsed.get("notes", ""),
                 "source": "natural_language",
             }
-            store.setdefault("usage_profiles", []).append(profile)
-            return {"applied": "usage_profile", "profile": profile}
+            if validate_profile(profile):
+                comfort = profile.get("comfort_c")
+                if comfort is None or 5 <= float(comfort) <= 35:
+                    store.setdefault("usage_profiles", []).append(profile)
+                    return {"applied": "usage_profile", "profile": profile}
+            intent = "knowledge_note"
 
     note = {
         "knowledge_id": str(uuid4()),
