@@ -132,3 +132,17 @@ E.S.T.E.R. inventaria in sola lettura le automazioni Home Assistant e le raggrup
 Lo stato `candidate_for_manual_migration` significa solo che una categoria può essere valutata per una disattivazione manuale delle vecchie automazioni. **E.S.T.E.R. non le disabilita automaticamente.**
 
 Il planner energia V1.3 è indipendente da Casa ES Energy Manager e può essere istruito con ruoli espliciti per FV, carico, rete, SOC e fasi, più carichi flessibili. Finché resta Shadow, Energy Manager e le automazioni attuali possono continuare a gestire fisicamente la casa mentre E.S.T.E.R. confronta le proprie decisioni.
+
+
+## Centro di controllo laterale
+La V1.3 registra una vera voce **E.S.T.E.R.** nel menu laterale di Home Assistant tramite un custom panel nativo. Non richiede di creare manualmente una dashboard Lovelace.
+
+Il centro di controllo include:
+- **CORE**: stato Shadow, nodi osservati, decisioni, domande e canale “Teach E.S.T.E.R.”;
+- **DECISIONI**: proposta, motivazione, confidence e rischio;
+- **DOMANDE**: Question Inbox con risposta diretta;
+- **ENERGIA**: strategia energetica locale, FV, casa, SOC, surplus e decisioni sui carichi;
+- **APPRENDIMENTO**: modelli termici, ventilazione, ACS e occupazione;
+- **MIGRAZIONE**: stato delle automazioni legacy e prontezza alla sostituzione manuale.
+
+Il pannello è amministrativo e non abilita attuazione reale.
