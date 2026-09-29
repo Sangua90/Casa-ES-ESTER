@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .ai.factory import create_provider
 from .language import apply_interpretation, local_interpret, validate_interpretation
+from .snapshots import create_snapshot
 from homeassistant.util import dt as dt_util
 
 
@@ -32,6 +33,12 @@ async def interpret_and_store(hass, coordinator, message: str) -> dict:
             provider_name = response.provider or "gemini"
 
     async with coordinator.storage.lock:
+        create_snapshot(
+            coordinator.storage.data,
+            dt_util.utcnow(),
+            "Prima di insegnamento naturale",
+            message[:200],
+        )
         result = apply_interpretation(
             coordinator.storage.data,
             parsed,
