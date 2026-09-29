@@ -410,5 +410,38 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(result["actuations"], 0)
         self.assertEqual(data["preferences"], before)
 
+
+    def test_question_is_user_facing_and_guided(self):
+        decision = {
+            "decision_id": "d2", "category": "climate", "area_id": "salotto",
+            "title": "Comfort da definire", "reasoning": "Temperatura osservata 18 °C.",
+            "confidence": 0.45, "risk": "medium",
+            "evidence": {"question": "Quale temperatura desideri?"},
+        }
+        item = questions.question_from_decision(decision, NOW)
+        self.assertEqual(item["display_title"], "Comfort di Salotto")
+        self.assertIn("Che temperatura", item["display_prompt"])
+        self.assertTrue(item["why_asking"])
+        self.assertIn("21 °C", item["quick_answers"])
+
+    def test_existing_open_question_gets_new_guided_fields(self):
+        existing = [{
+            "question_id": "old", "decision_id": "old-d", "category": "climate",
+            "area_id": "room", "title": "Comfort da definire",
+            "prompt": "Quale temperatura desideri?", "reasoning": "Serve target",
+            "confidence": 0.4, "risk": "medium", "status": "open",
+            "created_at": NOW.isoformat(), "updated_at": NOW.isoformat(),
+        }]
+        decision = {
+            "decision_id": "new-d", "category": "climate", "area_id": "room",
+            "title": "Comfort da definire", "reasoning": "Temperatura 18 °C",
+            "confidence": 0.5, "risk": "medium",
+            "evidence": {"question": "Quale temperatura desideri?"},
+        }
+        inbox, created = questions.merge_questions(existing, [decision], NOW + timedelta(minutes=5))
+        self.assertEqual(created, [])
+        self.assertIn("display_prompt", inbox[0])
+        self.assertTrue(inbox[0]["quick_answers"])
+
 if __name__ == "__main__":
     unittest.main()
