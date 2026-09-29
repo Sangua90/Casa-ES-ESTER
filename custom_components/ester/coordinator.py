@@ -24,6 +24,9 @@ from .thermal import build_room_thermal_model
 from .outcomes import evaluate_shadow_outcomes, calibration
 from .migration import legacy_automation_inventory
 from .readiness import migration_readiness
+from .ventilation import ventilation_model
+from .hot_water import hot_water_model
+from .occupancy import occupancy_model
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -84,9 +87,46 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 for area, points in thermal_samples.items()
             }
 
+            # Learn ventilation effectiveness, hot-water behavior and occupancy patterns.
+            ventilation_samples = data.setdefault("ventilation_samples", {})
+            occupancy_samples = data.setdefault("occupancy_samples", {})
+            hot_water_samples = data.setdefault("hot_water_samples", {})
+            local_tz = ZoneInfo(self.hass.config.time_zone)
+
+            for area in rooms:
+                local = [p for p in profiles if p.area_id == area]
+                humid = [sample_value(p) for p in local if p.role == "humidity" and sample_value(p) is not None]
+                fans = [p for p in local if p.role == "ventilation"]
+                if humid:
+                    pts = ventilation_samples.setdefault(area, [])
+                    pts.append({"t": now.timestamp(), "humidity": sum(humid)/len(humid),
+                                "active": any(p.state == "on" for p in fans)})
+                    ventilation_samples[area] = [s for s in pts if now.timestamp()-s["t"] <= 14*86400][-2000:]
+
+                presence = [p for p in local if p.role == "presence"]
+                if presence:
+                    occupied = any(
+                        (p.domain == "binary_sensor" and p.state == "on")
+                        or (p.domain in {"person","device_tracker"} and p.state == "home")
+                        for p in presence
+                    )
+                    pts = occupancy_samples.setdefault(area, [])
+                    pts.append({"t": now.timestamp(), "occupied": occupied})
+                    occupancy_samples[area] = [s for s in pts if now.timestamp()-s["t"] <= 30*86400][-9000:]
+
+                hot = [sample_value(p) for p in local if p.role == "hot_water" and sample_value(p) is not None]
+                if hot:
+                    pts = hot_water_samples.setdefault(area, [])
+                    pts.append({"t": now.timestamp(), "temp": sum(hot)/len(hot)})
+                    hot_water_samples[area] = [s for s in pts if now.timestamp()-s["t"] <= 30*86400][-4000:]
+
+            data["ventilation_models"] = {area: ventilation_model(points) for area, points in ventilation_samples.items()}
+            data["occupancy_models"] = {area: occupancy_model(points, local_tz) for area, points in occupancy_samples.items()}
+            data["hot_water_models"] = {area: hot_water_model(points) for area, points in hot_water_samples.items()}
+
             contexts = active_contexts(data["context_events"], now)
             usage = usage_snapshot(data.get("usage_profiles", []), now, ZoneInfo(self.hass.config.time_zone))
-            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage, data["thermal_models"], data.get("flexible_loads", []), ZoneInfo(self.hass.config.time_zone))
+            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage, data["thermal_models"], data.get("flexible_loads", []), ZoneInfo(self.hass.config.time_zone), data.get("ventilation_models", {}), data.get("hot_water_models", {}), data.get("occupancy_models", {}))
             suggestions = data_suggestions(profiles)
             for suggestion in suggestions:
                 proposal = self.engine.build_decision(category="model", title=suggestion["title"],
@@ -148,6 +188,9 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 "learning_entities": len(learning), "data_suggestions": suggestions,
                 "thermal_models": data.get("thermal_models", {}),
                 "calibration": data.get("calibration", {}),
+                "ventilation_models": data.get("ventilation_models", {}),
+                "hot_water_models": data.get("hot_water_models", {}),
+                "occupancy_models": data.get("occupancy_models", {}),
                 "automation_migration": legacy_automation_inventory(profiles),
                 "migration_readiness": migration_readiness(
                     legacy_automation_inventory(profiles),
