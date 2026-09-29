@@ -42,4 +42,3 @@ class EsterOptionsFlow(config_entries.OptionsFlow):
             vol.Optional("model"): str,
         })
         return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
-

@@ -106,6 +106,7 @@ def register_services(hass):
         return {"shadow_mode": True, "real_actuation_enabled": False,
                 "inventory": data.get("inventory", {}), "rooms": data.get("rooms", {}),
                 "contexts": data.get("contexts", []), "history": data.get("history", {}),
+                "data_suggestions": data.get("data_suggestions", []),
                 "decisions": coordinator.storage.data["decisions"][-call.data.get("limit", 20):]}
 
     async def explain(call):
@@ -145,4 +146,3 @@ def register_services(hass):
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
             supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision"} else SupportsResponse.NONE)
-

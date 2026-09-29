@@ -16,6 +16,7 @@ home = importlib.import_module("ester_core.home")
 models = importlib.import_module("ester_core.models")
 policies = importlib.import_module("ester_core.policies")
 Engine = importlib.import_module("ester_core.decision_engine").EsterDecisionEngine
+quality = importlib.import_module("ester_core.quality")
 NOW = datetime(2026, 9, 29, 12, tzinfo=timezone.utc)
 
 
@@ -29,6 +30,22 @@ def decisions(profiles, contexts=(), preferences=None, feedback=()):
 
 
 class CoreTests(unittest.TestCase):
+    def test_missing_data_suggestions_prefer_existing_entities(self):
+        climate = profile("climate", "heat", domain="climate")
+        results = quality.data_suggestions([climate])
+        temperature = next(s for s in results if s["missing_role"] == "temperature")
+        self.assertIn("temperatura", temperature["suggested_device"])
+        sensor = profile("temperature", "20", area=None)
+        temperature = next(s for s in quality.data_suggestions([climate, sensor]) if s["missing_role"] == "temperature")
+        self.assertIsNone(temperature["suggested_device"])
+        self.assertEqual(temperature["unassigned_candidates"], [sensor.entity_id])
+        sensor.area_id = "room"
+        self.assertFalse(any(s["missing_role"] == "temperature" for s in quality.data_suggestions([climate, sensor])))
+        sensor.state = "unavailable"
+        temperature = next(s for s in quality.data_suggestions([climate, sensor]) if s["missing_role"] == "temperature")
+        self.assertIsNone(temperature["suggested_device"])
+        self.assertEqual(temperature["existing_entities"], [sensor.entity_id])
+
     def test_percent_is_not_humidity(self):
         self.assertEqual(home.infer_role("sensor", "battery", "%", "battery"), "battery")
         self.assertEqual(home.infer_role("sensor", None, "%", "unknown"), "generic")

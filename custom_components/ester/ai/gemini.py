@@ -38,4 +38,3 @@ class GeminiProvider(AIProvider):
         if not text:
             raise ValueError("No text response")
         return AIResponse(text=text, provider=self.name, model=self.model)
-

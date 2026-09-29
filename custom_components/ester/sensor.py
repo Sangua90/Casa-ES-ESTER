@@ -28,6 +28,7 @@ async def async_setup_entry(
             EsterDecisionCountSensor(coordinator, entry),
             EsterQuestionsSensor(coordinator, entry),
             EsterSummarySensor(coordinator, entry),
+            EsterDataSuggestionsSensor(coordinator, entry),
         ]
     )
 
@@ -161,3 +162,21 @@ class EsterSummarySensor(EsterBaseSensor):
                 "contexts": [{k: c.get(k) for k in ("event_id", "label", "mode", "ends_at")} for c in data.get("contexts", [])],
                 "history": data.get("history", {}), "evaluated_at": data.get("evaluated_at"),
                 "learning_entities": data.get("learning_entities", 0)}
+
+class EsterDataSuggestionsSensor(EsterBaseSensor):
+    """Missing data and useful sensor types, without product endorsements."""
+    _attr_name = "Data suggestions"
+    _attr_icon = "mdi:lightbulb-on-outline"
+    _unrecorded_attributes = frozenset({"items"})
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "data_suggestions")
+
+    @property
+    def native_value(self):
+        return len((self.coordinator.data or {}).get("data_suggestions", []))
+
+    @property
+    def extra_state_attributes(self):
+        return {"items": (self.coordinator.data or {}).get("data_suggestions", []),
+                "source": "local_data_audit", "ai_explanation": "ester.explain_decision"}

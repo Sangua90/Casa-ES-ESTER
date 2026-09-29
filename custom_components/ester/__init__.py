@@ -34,4 +34,3 @@ async def async_unload_entry(hass, entry):
             await entry.runtime_data.storage.async_save()
         return True
     return False
-

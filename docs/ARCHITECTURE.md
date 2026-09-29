@@ -30,7 +30,7 @@ I servizi scrivono esclusivamente memoria E.S.T.E.R. e sono amministrativi. Le c
 - storage.py: persistenza interna.
 - services.py: otto servizi con validazione.
 - ai/: contratto astratto e adapter Gemini, disabilitato per default.
-- sensor.py: cinque sensori senza controlli.
+- sensor.py: sei sensori senza controlli.
 
 ## Motori
 | Motore | Comportamento V1 |
@@ -56,4 +56,3 @@ Release di riferimento: Home Assistant **2026.9.4**, 29 settembre 2026.
 - [Gemini generateContent](https://ai.google.dev/gemini-api/docs/text-generation): REST con chiave in header e nessun function calling.
 
 Le firme Recorder interne possono cambiare in future release: gli errori riducono la disponibilità dei dati, senza abilitare controlli. La CI esegue il motore e smoke test contro la release indicata; non sostituisce il collaudo sulla casa reale.
-

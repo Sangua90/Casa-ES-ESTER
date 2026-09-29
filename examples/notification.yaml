@@ -13,4 +13,3 @@ actions:
         {{ trigger.event.data.title }}:
         {{ trigger.event.data.evidence.question or trigger.event.data.reasoning }}
 mode: single
-

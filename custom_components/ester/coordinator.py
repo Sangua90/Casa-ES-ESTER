@@ -16,6 +16,8 @@ from .discovery import discover_entities, summarize_inventory
 from .history import HistoryReader, sample_value
 from .home import active_contexts, home_model, learn, occupancy_learning, timestamp
 from .policies import evaluate
+from .quality import data_suggestions
+from .models import RiskLevel, ImpactLevel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +58,16 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             data["learning"] = learning
             contexts = active_contexts(data["context_events"], now)
             proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now)
+            suggestions = data_suggestions(profiles)
+            for suggestion in suggestions:
+                proposal = self.engine.build_decision(category="model", title=suggestion["title"],
+                    proposed_action=suggestion["next_step"], reasoning=suggestion["benefit"],
+                    confidence=0.9, risk=RiskLevel.LOW, impact=ImpactLevel.MEDIUM,
+                    area_id=suggestion["area_id"],
+                    evidence={"data_suggestion": suggestion, "question": None},
+                    alternatives=["Associare o ripristinare un sensore esistente", "Continuare con minore copertura dei dati"])
+                proposal.outcome = {"type": "not_executed", "reason": "permanent_shadow_mode"}
+                proposals.append(proposal)
             journal = data["decisions"]
             states = {p.entity_id: p.state for p in profiles}
             for previous in journal:
@@ -68,7 +80,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             latest = []
             for proposal in proposals:
                 payload = proposal.as_dict()
-                key = hashlib.sha256(json.dumps([payload["category"], payload["title"], sorted(payload["entity_ids"]),
+                key = hashlib.sha256(json.dumps([payload["category"], payload["area_id"], payload["title"], sorted(payload["entity_ids"]),
                                                 payload["proposed_action"], payload["evidence"].get("modes")]).encode()).hexdigest()[:24]
                 previous = next((d for d in reversed(journal) if d.get("key") == key), None)
                 if previous and now - dt_util.parse_datetime(previous["created_at"]) < timedelta(hours=6):
@@ -89,10 +101,12 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             if payload["status"] == "needs_input":
                 self.hass.bus.async_fire(EVENT_QUESTION, payload)
         inventory = summarize_inventory(profiles)
+        for suggestion in suggestions:
+            suggestion["decision_id"] = next(d["decision_id"] for d in latest
+                if d["evidence"].get("data_suggestion", {}).get("key") == suggestion["key"])
         inventory.update(unassigned_entities=sum(not p.area_id for p in profiles), shadow_mode=True)
         return {"inventory": inventory, "rooms": home_model(profiles, learning),
                 "profiles": {p.entity_id: p.as_dict() for p in profiles}, "latest_decisions": latest,
                 "decision_count": len(journal), "contexts": contexts,
                 "history": {k: v for k, v in history.items() if k not in {"samples", "statistics"}},
-                "learning_entities": len(learning), "evaluated_at": now.isoformat()}
-
+                "learning_entities": len(learning), "data_suggestions": suggestions, "evaluated_at": now.isoformat()}

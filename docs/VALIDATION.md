@@ -8,7 +8,7 @@ Non vengono effettuate richieste Gemini reali.
 
 ## Dopo l'installazione nella casa
 1. Verificare che Status sia shadow e real_actuation_enabled sia false.
-2. Verificare le cinque entità del dispositivo e adattare gli ID nella dashboard.
+2. Verificare le sei entità del dispositivo e adattare gli ID nella dashboard.
 3. Consultare ester.get_summary: controllo aree, history.status e presenza di domande.
 4. Se Recorder è assente/esclude entità, verificare che E.S.T.E.R. continui ad aggiornarsi con dati live.
 5. Associare esplicitamente FV/consumo/accumulo; verificare unità e perimetro dei contatori prima di interpretare un surplus.
@@ -18,4 +18,3 @@ Non vengono effettuate richieste Gemini reali.
 9. Solo se desiderato, configurare Gemini e richiedere una spiegazione. Disabilitarlo e verificare il fallback locale.
 
 Un esito positivo dei test software non dimostra accuratezza delle previsioni nella casa: questa versione produce trend descrittivi e proposte da validare.
-

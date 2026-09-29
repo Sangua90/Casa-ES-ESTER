@@ -10,7 +10,7 @@ E.S.T.E.R. osserva Home Assistant, costruisce un modello delle stanze e registra
 - Valuta clima, FV/consumi/batteria, ACS, ventilazione/deumidificazione, irrigazione, luci, presenza e segnali di sicurezza.
 - Registra confidence, rischio, impatto, motivazioni, evidenze, alternative e osservazioni successive. Le osservazioni successive **non** dimostrano l'effetto di una proposta mai eseguita.
 - Conserva preferenze, contesti a scadenza e feedback. Supporta vacanza, ospiti, malattia e lavoro da casa.
-- Espone cinque sensori, otto servizi amministrativi e una dashboard di esempio.
+- Espone sei sensori, otto servizi amministrativi e una dashboard di esempio.
 - Funziona localmente senza AI. Gemini è opzionale, sostituibile e usato solo quando richiedi una spiegazione.
 
 ## Installazione e aggiornamento dalla v0.1
@@ -65,7 +65,7 @@ data:
 Valutazioni: `correct`, `wrong`, `partial`. Un secondo feedback sulla stessa decisione sostituisce il precedente. Il feedback negativo riduce la confidence della categoria; non crea automaticamente nuove regole operative.
 
 ## Dashboard e notifiche
-[Dashboard Lovelace di esempio](examples/dashboard.yaml): aggiungi una dashboard manuale e incolla il contenuto nell'editor YAML. Adatta gli ID ai cinque sensori presenti nella pagina del dispositivo E.S.T.E.R.; i nomi possono dipendere dalla versione precedente e dalle personalizzazioni.
+[Dashboard Lovelace di esempio](examples/dashboard.yaml): aggiungi una dashboard manuale e incolla il contenuto nell'editor YAML. Adatta gli ID ai sei sensori presenti nella pagina del dispositivo E.S.T.E.R.; i nomi possono dipendere dalla versione precedente e dalle personalizzazioni.
 
 I sensori mostrano stato Shadow, entità osservate, dimensione del registro, domande correnti e riepilogo. Il riepilogo completo è disponibile tramite `ester.get_summary`.
 
@@ -91,3 +91,6 @@ python -m unittest discover -s tests -v
 ```
 I test puri funzionano anche senza Home Assistant. I test d'integrazione richiedono Linux/Python 3.14 e Home Assistant 2026.9.4, installati da GitHub Actions. Nessun test accede ai dispositivi della casa o usa credenziali AI reali.
 
+
+## Come migliorare E.S.T.E.R.
+Il nuovo box nella dashboard e il sensore Data suggestions mostrano dati mancanti per stanza, utilità, priorità e tipo di sensore utile. Prima suggeriscono di ripristinare sensori non disponibili o associare entità senza area; hardware nuovo è una possibilità solo dopo queste verifiche. Copre temperatura, umidità, presenza e umidità del terreno in base ai dispositivi osservati. Ogni suggerimento ha un decision_id per la spiegazione locale o Gemini opzionale. Nessun prodotto specifico o acquisto automatico.

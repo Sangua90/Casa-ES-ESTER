@@ -98,4 +98,3 @@ class EsterDecisionEngine:
         ]
         weights = [0.35, 0.30, 0.20, 0.15]
         return round(sum(v * w for v, w in zip(values, weights, strict=True)), 3)
-

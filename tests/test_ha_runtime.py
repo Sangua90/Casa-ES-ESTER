@@ -18,6 +18,7 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.hass = HomeAssistant(self.directory.name)
         self.hass.config.time_zone = "Europe/Rome"
+        device_registry.async_setup(self.hass)
         await area_registry.async_load(self.hass)
         await device_registry.async_load(self.hass)
         await entity_registry.async_load(self.hass)
@@ -56,7 +57,7 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
         entry = SimpleNamespace(entry_id="test", runtime_data=coordinator)
         sensors = []
         await async_setup_entry(self.hass, entry, sensors.extend)
-        self.assertEqual(len(sensors), 5)
+        self.assertEqual(len(sensors), 6)
         self.assertEqual(sensors[0].native_value, "shadow")
         self.assertFalse(sensors[0].extra_state_attributes["real_actuation_enabled"])
 

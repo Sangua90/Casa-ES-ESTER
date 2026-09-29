@@ -32,3 +32,21 @@ views:
           {{ item.reasoning }}
 
           {% endfor %}
+      - type: markdown
+        title: Come migliorare E.S.T.E.R.
+        content: >-
+          {% set items = state_attr('sensor.e_s_t_e_r_data_suggestions', 'items') or [] %}
+          {% for item in items %}
+          ### {{ item.area_name }} — {{ item.missing_data }}
+
+          **Utilità:** {{ item.benefit }}
+
+          **Prossimo passo:** {{ item.next_step }}
+
+          {% if item.unassigned_candidates %}Entità da verificare: {{ item.unassigned_candidates | join(', ') }}{% endif %}
+
+          _Priorità: {{ item.priority }}. Spiegazione AI opzionale: ester.explain_decision, ID {{ item.decision_id }}._
+
+          {% else %}
+          Nessuna lacuna rilevata dai controlli attuali. La copertura dipende dalle stanze e dai dispositivi associati.
+          {% endfor %}
