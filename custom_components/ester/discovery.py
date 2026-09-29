@@ -26,35 +26,6 @@ _CONTROLLABLE_DOMAINS = {
 }
 
 
-def _infer_role(domain: str, device_class: str | None, unit: str | None, name: str) -> str:
-    """Infer a broad functional role without hard-coding the user's house."""
-    text = f"{name} {device_class or ''} {unit or ''}".lower()
-
-    if domain == "climate":
-        return "climate"
-    if domain == "water_heater" or any(k in text for k in ("boiler", "acqua calda", "water heater")):
-        return "hot_water"
-    if domain in {"light"}:
-        return "lighting"
-    if domain in {"alarm_control_panel", "lock", "siren"}:
-        return "security"
-    if domain in {"person", "device_tracker"}:
-        return "presence"
-    if domain in {"fan"}:
-        return "ventilation"
-    if domain in {"valve"} and any(k in text for k in ("irrig", "garden", "giardino", "sprinkler")):
-        return "irrigation"
-    if any(k in text for k in ("humidity", "umid", "%")):
-        return "humidity"
-    if any(k in text for k in ("temperature", "temperatura", "°c", "°f")):
-        return "temperature"
-    if any(k in text for k in ("power", "potenza", "energy", "energia", "kwh", "kw", "w")):
-        return "energy"
-    if domain == "binary_sensor" and any(k in text for k in ("occup", "motion", "presence", "presenza")):
-        return "presence"
-    return "generic"
-
-
 def discover_entities(hass: HomeAssistant, classifications=None) -> list[EntityProfile]:
     """Build a normalized snapshot of HA entities."""
     entity_reg = er.async_get(hass)

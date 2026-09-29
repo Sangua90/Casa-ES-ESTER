@@ -17,11 +17,11 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now):
     def emit(category, title, action, reason, entities=(), *, risk="low", impact="medium", question=None, evidence=None):
         ids = [p.entity_id for p in entities]
         trained = [learning.get(i, {}).get("samples", 0) >= 3 for i in ids]
-        confidence = engine.confidence_from_evidence(
-            evidence_quality=0.95 if ids and all(usable(p) for p in entities) else 0.2,
-            historical_similarity=0.8 if trained and all(trained) else 0.25,
-            sensor_agreement=0.85 if len(ids) > 1 else 0.5,
-            data_freshness=1 if ids and all(usable(p) for p in entities) else 0)
+        factors = dict(evidence_quality=0.95 if ids and all(usable(p) for p in entities) else 0.2,
+                       historical_similarity=0.8 if trained and all(trained) else 0.25,
+                       sensor_agreement=0.85 if len(ids) > 1 else 0.5,
+                       data_freshness=1 if ids and all(usable(p) for p in entities) else 0)
+        confidence = engine.confidence_from_evidence(**factors)
         # Negative feedback lowers confidence; never grants authority to operate devices.
         ratings = [f for f in feedback if f.get("category") == category][-20:]
         confidence -= min(0.25, sum(f.get("rating") == "wrong" for f in ratings) * 0.025)
@@ -29,7 +29,7 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now):
             confidence = min(confidence, 0.4)
         payload = {"observations": {p.entity_id: {"state": p.state, "value": numeric_value(p), "unit": p.unit} for p in entities},
                    "learning": {i: learning.get(i, {}) for i in ids}, "modes": sorted(modes),
-                   "question": question, **(evidence or {})}
+                   "question": question, "confidence_factors": factors, **(evidence or {})}
         d = engine.build_decision(category=category, title=title, proposed_action=action,
             reasoning=reason, confidence=confidence, risk=RiskLevel(risk), impact=ImpactLevel(impact),
             area_id=entities[0].area_id if entities else None, entity_ids=ids, evidence=payload,
@@ -52,6 +52,10 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now):
         absent = bool(presence) and all(p.state == "off" for p in presence)
         temps = [p for p in local if p.role == "temperature" and numeric_value(p) is not None]
         climates = [p for p in local if p.role == "climate"]
+        if climates and not temps:
+            emit("climate", "Temperatura stanza mancante", "Associare un sensore di temperatura ambiente",
+                 "Non uso il setpoint del termostato come temperatura misurata.", climates,
+                 question=f"Quale sensore misura la temperatura ambiente in {area}?")
         target = number(preferences.get(f"comfort:{area}"))
         if climates and temps:
             if target is None:

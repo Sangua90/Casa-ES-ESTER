@@ -17,7 +17,7 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
         from homeassistant.helpers import area_registry, device_registry, entity_registry
         self.directory = tempfile.TemporaryDirectory()
         self.hass = HomeAssistant(self.directory.name)
-        self.hass.config.set_time_zone("Europe/Rome")
+        self.hass.config.time_zone = "Europe/Rome"
         await area_registry.async_load(self.hass)
         await device_registry.async_load(self.hass)
         await entity_registry.async_load(self.hass)
@@ -99,7 +99,7 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
         coordinator.async_request_refresh = AsyncMock()
         entry = SimpleNamespace(runtime_data=coordinator, state=ConfigEntryState.LOADED, options={})
         coordinator.entry = entry
-        self.hass.config_entries = SimpleNamespace(async_entries=lambda domain: [entry])
+        self.hass.config_entries = SimpleNamespace(async_entries=lambda domain: [entry], async_shutdown=AsyncMock())
         register_services(self.hass)
         await self.hass.services.async_call("ester", "add_context", {"label": "Ospiti", "mode": "guests"}, blocking=True)
         self.assertEqual(len(store.data["context_events"]), 1)

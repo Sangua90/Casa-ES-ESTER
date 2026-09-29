@@ -14,7 +14,7 @@ from .const import DOMAIN, EVENT_DECISION, EVENT_QUESTION, MAX_DECISIONS
 from .decision_engine import EsterDecisionEngine
 from .discovery import discover_entities, summarize_inventory
 from .history import HistoryReader, sample_value
-from .home import active_contexts, home_model, learn, occupancy_learning
+from .home import active_contexts, home_model, learn, occupancy_learning, timestamp
 from .policies import evaluate
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,7 +42,9 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 del live[removed]
             for p in profiles[:500]:
                 points = live.setdefault(p.entity_id, [])
-                points.append({"t": now.timestamp(), "v": sample_value(p)})
+                reported = timestamp(p.attributes.get("last_reported"))
+                fresh = reported is not None and 0 <= now.timestamp() - reported <= 7200
+                points.append({"t": now.timestamp(), "v": sample_value(p) if fresh else None})
                 live[p.entity_id] = points = [s for s in points if now.timestamp() - s["t"] <= 86400][-300:]
                 samples = history["samples"].get(p.entity_id, []) + points
                 learning[p.entity_id] = learn(samples, now)

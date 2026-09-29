@@ -103,6 +103,7 @@ class EsterDecisionCountSensor(EsterBaseSensor):
 
     _attr_name = "Shadow decisions"
     _attr_icon = "mdi:thought-bubble"
+    _unrecorded_attributes = frozenset({"latest"})
 
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "decisions")
@@ -123,6 +124,7 @@ class EsterQuestionsSensor(EsterBaseSensor):
 
     _attr_name = "Questions"
     _attr_icon = "mdi:comment-question"
+    _unrecorded_attributes = frozenset({"items"})
 
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "questions")
@@ -136,7 +138,7 @@ class EsterQuestionsSensor(EsterBaseSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         latest = (self.coordinator.data or {}).get("latest_decisions", [])
         return {
-            "items": [item for item in latest if item.get("status") == "needs_input"]
+            "items": [item for item in latest if item.get("status") == "needs_input"][:20]
         }
 
 class EsterSummarySensor(EsterBaseSensor):
