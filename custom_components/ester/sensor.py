@@ -20,13 +20,15 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up E.S.T.E.R. sensors."""
-    coordinator: EsterCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator: EsterCoordinator = entry.runtime_data
     async_add_entities(
         [
             EsterStatusSensor(coordinator, entry),
             EsterEntityCountSensor(coordinator, entry),
             EsterDecisionCountSensor(coordinator, entry),
             EsterQuestionsSensor(coordinator, entry),
+            EsterSummarySensor(coordinator, entry),
+            EsterDataSuggestionsSensor(coordinator, entry),
         ]
     )
 
@@ -45,7 +47,7 @@ class EsterBaseSensor(CoordinatorEntity[EsterCoordinator], SensorEntity):
             "name": "E.S.T.E.R.",
             "manufacturer": "Casa ES",
             "model": "Intelligent Home Manager",
-            "sw_version": "0.1.0",
+            "sw_version": "1.0.0",
         }
 
 
@@ -102,6 +104,7 @@ class EsterDecisionCountSensor(EsterBaseSensor):
 
     _attr_name = "Shadow decisions"
     _attr_icon = "mdi:thought-bubble"
+    _unrecorded_attributes = frozenset({"latest"})
 
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "decisions")
@@ -122,6 +125,7 @@ class EsterQuestionsSensor(EsterBaseSensor):
 
     _attr_name = "Questions"
     _attr_icon = "mdi:comment-question"
+    _unrecorded_attributes = frozenset({"items"})
 
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "questions")
@@ -135,5 +139,44 @@ class EsterQuestionsSensor(EsterBaseSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         latest = (self.coordinator.data or {}).get("latest_decisions", [])
         return {
-            "items": [item for item in latest if item.get("status") == "needs_input"]
+            "items": [item for item in latest if item.get("status") == "needs_input"][:20]
         }
+
+class EsterSummarySensor(EsterBaseSensor):
+    """Compact UI summary, with full details available through get_summary."""
+    _attr_name = "Summary"
+    _attr_icon = "mdi:home-analytics"
+    _unrecorded_attributes = frozenset({"rooms", "contexts", "history"})
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "summary")
+
+    @property
+    def native_value(self):
+        return len((self.coordinator.data or {}).get("rooms", {}))
+
+    @property
+    def extra_state_attributes(self):
+        data = self.coordinator.data or {}
+        return {"rooms": {key: {"name": r["name"], "entities": len(r["entities"])} for key, r in data.get("rooms", {}).items()},
+                "contexts": [{k: c.get(k) for k in ("event_id", "label", "mode", "ends_at")} for c in data.get("contexts", [])],
+                "history": data.get("history", {}), "evaluated_at": data.get("evaluated_at"),
+                "learning_entities": data.get("learning_entities", 0)}
+
+class EsterDataSuggestionsSensor(EsterBaseSensor):
+    """Missing data and useful sensor types, without product endorsements."""
+    _attr_name = "Data suggestions"
+    _attr_icon = "mdi:lightbulb-on-outline"
+    _unrecorded_attributes = frozenset({"items"})
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "data_suggestions")
+
+    @property
+    def native_value(self):
+        return len((self.coordinator.data or {}).get("data_suggestions", []))
+
+    @property
+    def extra_state_attributes(self):
+        return {"items": (self.coordinator.data or {}).get("data_suggestions", []),
+                "source": "local_data_audit", "ai_explanation": "ester.explain_decision"}

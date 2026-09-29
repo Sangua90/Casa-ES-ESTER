@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 
 from .models import EntityProfile
+from .home import infer_role
 
 _READ_ONLY_DOMAINS = {
     "sensor", "binary_sensor", "weather", "sun", "person", "device_tracker",
@@ -25,36 +26,7 @@ _CONTROLLABLE_DOMAINS = {
 }
 
 
-def _infer_role(domain: str, device_class: str | None, unit: str | None, name: str) -> str:
-    """Infer a broad functional role without hard-coding the user's house."""
-    text = f"{name} {device_class or ''} {unit or ''}".lower()
-
-    if domain == "climate":
-        return "climate"
-    if domain == "water_heater" or any(k in text for k in ("boiler", "acqua calda", "water heater")):
-        return "hot_water"
-    if domain in {"light"}:
-        return "lighting"
-    if domain in {"alarm_control_panel", "lock", "siren"}:
-        return "security"
-    if domain in {"person", "device_tracker"}:
-        return "presence"
-    if domain in {"fan"}:
-        return "ventilation"
-    if domain in {"valve"} and any(k in text for k in ("irrig", "garden", "giardino", "sprinkler")):
-        return "irrigation"
-    if any(k in text for k in ("humidity", "umid", "%")):
-        return "humidity"
-    if any(k in text for k in ("temperature", "temperatura", "°c", "°f")):
-        return "temperature"
-    if any(k in text for k in ("power", "potenza", "energy", "energia", "kwh", "kw", "w")):
-        return "energy"
-    if domain == "binary_sensor" and any(k in text for k in ("occup", "motion", "presence", "presenza")):
-        return "presence"
-    return "generic"
-
-
-def discover_entities(hass: HomeAssistant) -> list[EntityProfile]:
+def discover_entities(hass: HomeAssistant, classifications=None) -> list[EntityProfile]:
     """Build a normalized snapshot of HA entities."""
     entity_reg = er.async_get(hass)
     device_reg = dr.async_get(hass)
@@ -66,6 +38,8 @@ def discover_entities(hass: HomeAssistant) -> list[EntityProfile]:
         entity_id = state.entity_id
         domain = entity_id.split(".", 1)[0]
         reg_entry = entity_reg.async_get(entity_id)
+        if (reg_entry and reg_entry.platform == "ester") or entity_id.startswith("sensor.ester_"):
+            continue
 
         device_id = reg_entry.device_id if reg_entry else None
         area_id = reg_entry.area_id if reg_entry else None
@@ -78,6 +52,10 @@ def discover_entities(hass: HomeAssistant) -> list[EntityProfile]:
         friendly_name = state.attributes.get("friendly_name", entity_id)
         unit = state.attributes.get("unit_of_measurement")
         device_class = state.attributes.get("device_class")
+        override = (classifications or {}).get(entity_id, {})
+        area_id = override.get("area_id", area_id)
+        if domain in {"climate", "water_heater"}:
+            unit = unit or hass.config.units.temperature_unit
 
         profile = EntityProfile(
             entity_id=entity_id,
@@ -88,10 +66,14 @@ def discover_entities(hass: HomeAssistant) -> list[EntityProfile]:
             device_id=device_id,
             unit=unit,
             device_class=device_class,
-            role=_infer_role(domain, device_class, unit, friendly_name),
+            role=override.get("role") or infer_role(domain, device_class, unit, friendly_name),
             controllable=domain in _CONTROLLABLE_DOMAINS and domain not in _READ_ONLY_DOMAINS,
             sensitive=domain in _SENSITIVE_DOMAINS,
             attributes={
+                **{k: state.attributes[k] for k in ("current_temperature", "temperature", "hvac_action", "state_class") if k in state.attributes},
+                "last_updated": state.last_updated.isoformat(),
+                "last_reported": state.last_reported.isoformat(),
+                "classification_source": "user" if override.get("role") else "inferred",
                 "area_name": area_reg.async_get_area(area_id).name if area_id and area_reg.async_get_area(area_id) else None,
             },
         )

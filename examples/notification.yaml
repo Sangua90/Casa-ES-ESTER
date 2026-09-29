@@ -1,0 +1,15 @@
+# Esempio opzionale: importa come automazione solo se desideri notifiche.
+# Non viene installato o attivato dall'integrazione.
+alias: E.S.T.E.R. - domanda Shadow
+triggers:
+  - trigger: event
+    event_type: ester_question
+actions:
+  - action: persistent_notification.create
+    data:
+      notification_id: ester_shadow_question
+      title: E.S.T.E.R. - Shadow Mode
+      message: >-
+        {{ trigger.event.data.title }}:
+        {{ trigger.event.data.evidence.question or trigger.event.data.reasoning }}
+mode: single

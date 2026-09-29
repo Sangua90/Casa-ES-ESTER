@@ -7,18 +7,16 @@ services and therefore cannot actuate devices in Shadow Mode.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
-from homeassistant.core import HomeAssistant
-from homeassistant.util import dt as dt_util
 
 from .models import Decision, DecisionStatus, ImpactLevel, RiskLevel
 
 
 @dataclass(slots=True)
 class RiskPolicy:
-    """Minimum confidence required before future autonomous actuation."""
+    """Threshold for a sufficiently supported shadow proposal; never execution permission."""
 
     low: float = 0.60
     medium: float = 0.80
@@ -35,9 +33,9 @@ class RiskPolicy:
 
 
 class EsterDecisionEngine:
-    """Central decision engine. v0.1 generates safe shadow proposals only."""
+    """Central decision builder for permanent Shadow Mode."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass=None) -> None:
         self.hass = hass
         self.risk_policy = RiskPolicy()
 
@@ -68,7 +66,7 @@ class EsterDecisionEngine:
 
         return Decision(
             decision_id=str(uuid4()),
-            created_at=dt_util.utcnow(),
+            created_at=datetime.now(timezone.utc),
             category=category,
             title=title,
             proposed_action=proposed_action,
@@ -100,32 +98,3 @@ class EsterDecisionEngine:
         ]
         weights = [0.35, 0.30, 0.20, 0.15]
         return round(sum(v * w for v, w in zip(values, weights, strict=True)), 3)
-
-    async def evaluate_snapshot(self, inventory: dict) -> list[Decision]:
-        """Run initial generic checks against the current home snapshot.
-
-        v0.1 intentionally avoids pretending to understand the house before
-        learning enough context. It creates onboarding/quality decisions only.
-        """
-        decisions: list[Decision] = []
-
-        unassigned = inventory.get("unassigned_entities", 0)
-        if unassigned:
-            decisions.append(
-                self.build_decision(
-                    category="model",
-                    title="Improve room mapping",
-                    proposed_action=f"Classify {unassigned} entities that have no Home Assistant area.",
-                    reasoning=(
-                        "Room context is one of the strongest signals for climate, "
-                        "presence and comfort decisions. Missing area assignments "
-                        "lower confidence."
-                    ),
-                    confidence=0.98,
-                    risk=RiskLevel.LOW,
-                    impact=ImpactLevel.MEDIUM,
-                    evidence={"unassigned_entities": unassigned},
-                )
-            )
-
-        return decisions

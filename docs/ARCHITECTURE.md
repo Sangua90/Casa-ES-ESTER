@@ -1,121 +1,58 @@
-# E.S.T.E.R. architecture
+# Architettura V1 Shadow Mode
 
-## Name
+## Confine operativo
+Discovery → Recorder opzionale → modello/learning → motori deterministici → registro e sensori.
+Non esiste alcun esecutore. Le soglie low 0.60, medium 0.80, high 0.93, critical 0.99 distinguono una proposta sufficientemente supportata da una domanda; non autorizzano azioni.
 
-**E.S.T.E.R. — Everything Seems Totally Easy, Right?**
+I servizi scrivono esclusivamente memoria E.S.T.E.R. e sono amministrativi. Le correzioni di classificazione non modificano il registro HA. I moduli AI ricevono un riepilogo esplicitamente richiesto, senza oggetti HomeAssistant o accesso ai servizi.
 
-## Design principle
+## Dati e limiti
+- Aggiornamento ogni 5 minuti; osservazione degli stati attuali senza listener per ogni variazione.
+- Recorder: finestra 24 ore, refresh ogni 30 minuti, batch 20 entità, massimo 100 entità ordinate per ID, selezionate per ruoli utili all'apprendimento. Il riepilogo espone il troncamento.
+- Conservazione di massimo 1.000 punti storici per entità; la query può leggere più righe prima del campionamento. Su database molto trafficati la finestra deve restare contenuta.
+- Statistiche: fino a 7 giorni, periodo hour, solo entità con state_class appropriata. Le statistiche mantengono i metadati/valori del Recorder, non vengono sommate a contatori istantanei.
+- Memoria live: massimo 500 entità, 300 campioni ciascuna, finestra 24 ore. Il confronto termico avviene in °C, quello di potenza in W; unità mancanti o non compatibili sono escluse.
+- Regressione sull'ultimo episodio senza valori unknown/NaN e senza intervalli oltre due ore; almeno tre campioni e mezz'ora. È una tendenza, non un modello causale.
+- Occupazione per ora locale: durata pesata, almeno 15 minuti osservati per cella; intervalli oltre due ore restano ignoti. Le frequenze derivano dalle ultime 24 ore, non sono previsioni settimanali.
+- Sensori non aggiornati da oltre due ore sono trattati conservativamente come non affidabili anche se lo stato potrebbe essere ancora valido.
+- Store HA versione 1, compatibile con la memoria iniziale. Lock condiviso tra valutazione e servizi; snapshot copiato al salvataggio.
+- Registro: massimo 500 decisioni; massimo 500 feedback e 100 contesti. Deduplicazione della stessa proposta per sei ore; rivalutazione corrente esposta nei sensori, evidenza originaria conservata nel registro.
+- Dopo 30 minuti il registro annota lo stato osservato successivamente, senza attribuire causalità alla proposta.
+- Domande correnti nel sensore, prime 20 in attributi; ultime cinque decisioni in attributi. Il registro completo recente si consulta con get_summary. Attributi estesi esclusi dal Recorder.
 
-The user expresses intentions and context. E.S.T.E.R. observes the home, learns from history, selects strategies and explains important decisions.
+## Moduli
+- home.py: numeri finiti, unità, ruoli, contesti attivi, trend e stanze.
+- discovery.py: stato HA e registri entità/dispositivi/aree; esclude l'integrazione stessa.
+- history.py: letture opzionali sul thread executor del Recorder, degradazione allo stato live in caso di errore.
+- policies.py: motori locali senza import Home Assistant.
+- decision_engine.py: confidence e soglie rischio. I fattori sono registrati nelle evidenze; feedback negativo riduce il punteggio.
+- coordinator.py: orchestration, journal e outcome; nessuna chiamata servizi.
+- storage.py: persistenza interna.
+- services.py: otto servizi con validazione.
+- ai/: contratto astratto e adapter Gemini, disabilitato per default.
+- sensor.py: sei sensori senza controlli.
 
-The LLM is **not** the real-time controller.
+## Motori
+| Motore | Comportamento V1 |
+|---|---|
+| Clima | Confronto temperatura ambiente e comfort esplicito in stanza occupata; domanda per dati mancanti; vacanza richiede limiti concordati. |
+| Energia | Una sorgente FV e una di consumo totale associate esplicitamente, confronto W senza doppio conteggio; accumulo solo se associato dall'utente. Richiede perimetro contatori e vincoli. |
+| ACS | Trend temperatura e richiesta di programma sanitario/fasce d'uso; nessuna soglia sanitaria inventata. |
+| Ventilazione | Umidità >65% genera valutazione; richiede condizioni esterne e rumore prima di scegliere ventilazione/deumidificazione. |
+| Irrigazione | Soglia terreno configurabile e domande su pioggia/vincoli; senza sensori chiede associazione. |
+| Luci | Segnala luci con assenza di movimento; ospiti, malattia e lavoro da casa richiedono comfort protetto. |
+| Presenza | Stato sensori e frequenze d'uso per ora locale, senza identificazione persone. |
+| Sicurezza | Segnali attivi o dati non affidabili richiedono verifica; nessun disarmo, sblocco o silenziamento. |
 
-## Layers
+I modi su aree specifiche non cambiano le regole delle altre stanze. Le note libere restano memoria e non vengono trasformate automaticamente in policy. Le domande si risolvono correggendo associazioni/preferenze/sensori; il feedback valuta la proposta ma non sostituisce un dato mancante.
 
-1. **Home Assistant**
-   - Source of entity/device/area state
-   - Source of Recorder/history/statistics
-   - Actuation layer in future versions
+## API di riferimento verificate
+Release di riferimento: Home Assistant **2026.9.4**, 29 settembre 2026.
+- [Recorder history](https://github.com/home-assistant/core/blob/2026.9.4/homeassistant/components/recorder/history/__init__.py): get_significant_states con risposta State non compressa e attributi.
+- [Recorder statistics](https://github.com/home-assistant/core/blob/2026.9.4/homeassistant/components/recorder/statistics.py): statistics_during_period(hass, start, end, ids, period, units, types).
+- [Recorder helper](https://github.com/home-assistant/core/blob/2026.9.4/homeassistant/helpers/recorder.py): get_instance e async_add_executor_job.
+- [Admin services](https://github.com/home-assistant/core/blob/2026.9.4/homeassistant/helpers/service.py): async_register_admin_service e risposte.
+- [Config entries](https://developers.home-assistant.io/docs/config_entries_index/): runtime_data, forwarding sensori, unload e listener opzioni.
+- [Gemini generateContent](https://ai.google.dev/gemini-api/docs/text-generation): REST con chiave in header e nessun function calling.
 
-2. **Discovery & classification**
-   - Discovers all available HA entities
-   - Maps entities to areas/devices
-   - Infers broad roles such as climate, energy, hot water, presence, ventilation, irrigation and security
-   - User corrections will override inferred classifications
-
-3. **Home model**
-   - Rooms/areas
-   - Devices and capabilities
-   - Environmental state
-   - Presence confidence
-   - Energy state
-   - Learned thermal/usage behavior
-
-4. **Memory**
-   - Permanent preferences
-   - Temporary context/events
-   - Learned behavior
-   - Decision history
-   - User feedback
-
-5. **Decision engine**
-   - Generates candidate strategies
-   - Estimates confidence
-   - Assigns risk and impact
-   - Compares alternatives
-   - Requests information when confidence is insufficient for the risk
-
-6. **Shadow executor**
-   - v0.1 only
-   - Records what E.S.T.E.R. would do
-   - Never calls Home Assistant control services
-
-7. **AI layer**
-   - Interprets natural language
-   - Converts voice/text intentions into structured context/policies
-   - Explains decisions
-   - Provider-independent interface
-   - Gemini is the first planned provider
-
-8. **Future autonomous executor**
-   - Disabled in v0.1
-   - Will act only inside explicit safety/risk boundaries
-   - Low-risk actions may require lower confidence than high-risk actions
-
-## Confidence is not a permission by itself
-
-A decision combines:
-
-- confidence in the interpretation/model
-- risk if the decision is wrong
-- economic/comfort impact
-- reversibility
-- safety constraints
-
-Example target thresholds in the current engine:
-
-- low risk: 60%
-- medium risk: 80%
-- high risk: 93%
-- critical: 99%
-
-These are future actuation thresholds. In v0.1 all decisions remain virtual.
-
-## Context examples
-
-Temporary context should be expressible naturally:
-
-- "Ester is home sick today."
-- "We are away this weekend."
-- "Guests are staying tonight."
-- "I will use the gym at 19:00."
-- "Do not heat domestic hot water electrically until April."
-
-The AI layer will convert these statements into structured, expiring context or persistent preferences.
-
-## Learning targets
-
-E.S.T.E.R. should eventually learn:
-
-- thermal response per room
-- cooling/heating retention
-- hot-water demand and recovery
-- ventilation effectiveness by season/outdoor conditions
-- occupancy/use patterns
-- energy cost tradeoffs
-- effectiveness of previous decisions
-
-## Safety boundary
-
-Security, alarms, locks, inverter/battery protections and other high-impact controls will retain hard constraints outside the LLM. E.S.T.E.R. may reason about them, but it must never bypass safety constraints.
-
-## v0.1 definition of done
-
-- installs through config flow
-- observes all HA entities
-- maps areas/devices where available
-- classifies broad roles
-- persists context and feedback
-- produces shadow decisions
-- exposes diagnostic sensors
-- performs no real device actuation
+Le firme Recorder interne possono cambiare in future release: gli errori riducono la disponibilità dei dati, senza abilitare controlli. La CI esegue il motore e smoke test contro la release indicata; non sostituisce il collaudo sulla casa reale.
