@@ -33,6 +33,7 @@ from .kpi import shadow_kpis
 from .health import autonomy_health
 from .seasonal import season_context
 from .anomaly import detect_anomalies
+from .daily_forecast import daily_forecast
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -221,6 +222,14 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             kpis,
             migration,
         )
+        day_forecast = daily_forecast(
+            now.astimezone(local_tz),
+            usage,
+            season,
+            journal,
+            data.get("questions", []),
+            anomalies,
+        )
         return {"inventory": inventory, "rooms": home_model(profiles, learning),
                 "profiles": {p.entity_id: p.as_dict() for p in profiles}, "latest_decisions": latest,
                 "decision_count": len(journal), "contexts": contexts, "usage": usage,
@@ -246,5 +255,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                     {k: s.get(k) for k in ("snapshot_id","created_at","label","reason")}
                     for s in data.get("memory_versions", [])[-20:]
                 ],
+                "daily_forecast": day_forecast,
+                "decision_history": journal[-100:],
                 "flexible_loads": data.get("flexible_loads", []),
                 "evaluated_at": now.isoformat()}
