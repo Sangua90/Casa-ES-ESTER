@@ -47,7 +47,7 @@ class EsterBaseSensor(CoordinatorEntity[EsterCoordinator], SensorEntity):
             "name": "E.S.T.E.R.",
             "manufacturer": "Casa ES",
             "model": "Intelligent Home Manager",
-            "sw_version": "1.0.0",
+            "sw_version": "1.1.0",
         }
 
 
@@ -160,7 +160,7 @@ class EsterSummarySensor(EsterBaseSensor):
         data = self.coordinator.data or {}
         return {"rooms": {key: {"name": r["name"], "entities": len(r["entities"])} for key, r in data.get("rooms", {}).items()},
                 "contexts": [{k: c.get(k) for k in ("event_id", "label", "mode", "ends_at")} for c in data.get("contexts", [])],
-                "history": data.get("history", {}), "evaluated_at": data.get("evaluated_at"),
+                "history": data.get("history", {}), "usage": data.get("usage", {}), "evaluated_at": data.get("evaluated_at"),
                 "learning_entities": data.get("learning_entities", 0)}
 
 class EsterDataSuggestionsSensor(EsterBaseSensor):
