@@ -112,3 +112,35 @@ def interpret_answer(question: dict, answer: str) -> dict:
         "confidence": 0.7,
         "summary": "Risposta conservata come conoscenza; nessuna regola automatica creata.",
     }
+
+
+def apply_answer(data: dict, question_id: str, answer: str, now: datetime) -> dict:
+    """Apply a user answer to E.S.T.E.R. memory without touching devices."""
+    question = next((q for q in data.setdefault("questions", [])
+                     if q.get("question_id") == question_id), None)
+    if question is None:
+        raise KeyError("unknown_question")
+    if question.get("status") == "answered":
+        raise ValueError("already_answered")
+    interpretation = interpret_answer(question, answer)
+    question["status"] = "answered"
+    question["answer"] = answer.strip()
+    question["interpretation"] = interpretation
+    question["updated_at"] = now.isoformat()
+    if interpretation["kind"] == "preference":
+        data.setdefault("preferences", {})[interpretation["key"]] = interpretation["value"]
+    else:
+        knowledge = data.setdefault("knowledge", [])
+        knowledge.append({
+            "knowledge_id": str(uuid4()),
+            "question_id": question_id,
+            "category": interpretation.get("category"),
+            "area_id": interpretation.get("area_id"),
+            "text": interpretation.get("text", answer.strip()),
+            "scope": interpretation.get("scope", "temporary"),
+            "confidence": interpretation.get("confidence", 0.5),
+            "created_at": now.isoformat(),
+            "source": "user_answer",
+        })
+        del knowledge[:-500]
+    return interpretation
