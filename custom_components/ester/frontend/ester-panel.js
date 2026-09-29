@@ -53,7 +53,7 @@ class EsterPanel extends HTMLElement {
     await this.call("ester", "answer_question", {question_id: questionId, answer});
   }
 
-  startSpeech(targetId) {
+  async startSpeech(targetId) {
     const target = this.shadowRoot?.querySelector("#" + CSS.escape(targetId));
     if (!target) return;
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -74,6 +74,10 @@ class EsterPanel extends HTMLElement {
       return;
     }
     if (this._hass?.auth?.external?.config?.hasAssist) {
+      if (targetId.startsWith("answer-")) {
+        const question_id = targetId.slice(7);
+        await this._hass.callService("ester", "select_voice_question", {question_id});
+      }
       this._hass.auth.external.fireMessage({
         type:"assist/show",
         payload:{pipeline_id:"preferred",start_listening:true}
@@ -544,9 +548,15 @@ class EsterPanel extends HTMLElement {
     let body = "";
     if (this._tab === "overview") {
       body = `
-        <section class="hero">
-          <div class="jarvis"><div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><div class="core-dot"></div></div>
-          <div>
+        <section class="hero jarvis-stage">
+          <div class="hud-grid"></div>
+          <div class="jarvis">
+            <div class="ring r0"></div><div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+            <div class="tick-ring"></div>
+            <div class="core-dot"></div>
+            <div class="scan-line"></div>
+          </div>
+          <div class="hero-data">
             <div class="eyebrow">EVERYTHING SEEMS TOTALLY EASY, RIGHT?</div>
             <h1>E.S.T.E.R.</h1>
             <p class="lead">Home Intelligence Core · Pre-Autonomy Shadow</p>
@@ -599,11 +609,11 @@ class EsterPanel extends HTMLElement {
         nav{display:flex;gap:8px;overflow:auto;padding:6px 0 18px;position:sticky;top:0;z-index:5;background:linear-gradient(#03080df2,#03080dd9 75%,transparent)}
         button{border:1px solid #19d9ff55;background:#071b24;color:#7feeff;padding:10px 14px;border-radius:7px;letter-spacing:.06em;cursor:pointer}
         button:hover{background:#0b3443;box-shadow:0 0 15px #00cfff30}nav button.active{background:#0b3443;box-shadow:0 0 18px #00cfff40;border-color:#38e7ff}
-        .hero{min-height:300px;display:flex;align-items:center;justify-content:center;gap:60px;border:1px solid #1cc9e32e;background:linear-gradient(135deg,#06151db8,#03101766);border-radius:16px;box-shadow:inset 0 0 50px #00cfff0d,0 15px 50px #0008}
+.hero{min-height:360px;display:flex;align-items:center;justify-content:center;gap:72px;border-top:1px solid #64eaff40;border-bottom:1px solid #64eaff2e;background:linear-gradient(90deg,transparent,#061b24a8 20%,#031117d9 50%,#061b24a8 80%,transparent);position:relative;overflow:hidden;box-shadow:inset 0 0 90px #00d9ff0c}.jarvis-stage:before,.jarvis-stage:after{content:"";position:absolute;top:12%;bottom:12%;width:1px;background:linear-gradient(transparent,#5aefff99,transparent);box-shadow:0 0 12px #00dcff}.jarvis-stage:before{left:6%}.jarvis-stage:after{right:6%}.hud-grid{position:absolute;inset:0;background-image:linear-gradient(#35dff70a 1px,transparent 1px),linear-gradient(90deg,#35dff70a 1px,transparent 1px);background-size:28px 28px;mask-image:radial-gradient(circle at center,#000 20%,transparent 72%)}
         h1{font-size:clamp(54px,9vw,130px);letter-spacing:.16em;margin:2px 0;color:#e8fdff;text-shadow:0 0 14px #75eeff,0 0 50px #0acfea60}
         h2.section-title{font-size:15px;letter-spacing:.18em;color:#63eaff;margin:30px 0 12px}.lead{font-size:18px;color:#8dbbc6}
         .eyebrow{font-size:11px;letter-spacing:.18em;color:#4acde8;text-transform:uppercase}.statusline{font-family:monospace;color:#6ff7d0;margin:6px 0}.pulse{display:inline-block;width:8px;height:8px;background:#60ffd5;border-radius:50%;box-shadow:0 0 12px #60ffd5;margin-right:8px}
-        .jarvis{width:220px;height:220px;position:relative;border-radius:50%;display:grid;place-items:center}.ring{position:absolute;border:1px solid #48eaff;border-radius:50%;box-shadow:0 0 22px #00d9ff55,inset 0 0 18px #00d9ff33}.r1{inset:4%;animation:spin 14s linear infinite}.r2{inset:18%;border-style:dashed;animation:spin 9s linear reverse infinite}.r3{inset:32%;animation:pulseRing 2s ease-in-out infinite}.core-dot{width:44px;height:44px;border-radius:50%;background:#c7fbff;box-shadow:0 0 18px #fff,0 0 55px #00eaff,0 0 110px #00d9ff}
+        .jarvis{width:290px;height:290px;position:relative;border-radius:50%;display:grid;place-items:center;filter:drop-shadow(0 0 26px #00d9ff33)}.ring{position:absolute;border:1px solid #48eaff;border-radius:50%;box-shadow:0 0 18px #00d9ff40,inset 0 0 18px #00d9ff28}.r0{inset:0;border-style:dotted;opacity:.45;animation:spin 25s linear reverse infinite}.r1{inset:8%;border-width:2px;border-left-color:transparent;border-bottom-color:#48eaff33;animation:spin 14s linear infinite}.r2{inset:23%;border-style:dashed;animation:spin 9s linear reverse infinite}.r3{inset:37%;border-width:2px;animation:pulseRing 2s ease-in-out infinite}.tick-ring{position:absolute;inset:14%;border-radius:50%;background:repeating-conic-gradient(#5cecff 0 1deg,transparent 1deg 7deg);mask:radial-gradient(circle,transparent 0 43%,#000 44% 48%,transparent 49%);opacity:.62;animation:spin 40s linear infinite}.core-dot{width:54px;height:54px;border-radius:50%;background:radial-gradient(circle,#fff 0 12%,#9ef8ff 18%,#25dff5 40%,#063e4d 65%,transparent 68%);box-shadow:0 0 20px #fff,0 0 55px #00eaff,0 0 120px #00d9ff}.scan-line{position:absolute;width:46%;height:1px;background:linear-gradient(90deg,transparent,#7af5ff,transparent);transform-origin:100% 50%;left:4%;top:50%;animation:spin 4s linear infinite}.hero-data{position:relative;z-index:2}
         @keyframes spin{to{transform:rotate(360deg)}}@keyframes pulseRing{50%{transform:scale(1.08);opacity:.55}}
         .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}.stats>div,.metrics>div{padding:18px;border:1px solid #16d8ff35;background:#06151d9e;border-radius:10px}.stats b,.metrics b{display:block;font-size:28px;color:#d9fbff}.stats span,.metrics span{font-size:10px;letter-spacing:.14em;color:#55bdd0}
         .teach,.control,.health{border:1px solid #1eddfc40;background:#041219c8;border-radius:12px;padding:15px}.teach-row,.answer-row,.button-row{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
@@ -612,7 +622,7 @@ class EsterPanel extends HTMLElement {
         .decision-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.decision h3,.question h3,.migration h3,.model h3{margin:5px 0 10px;color:#e9fdff}.confidence{font-family:monospace;font-size:25px;color:#68efff}.meter{height:3px;background:#0e2a34;margin:8px 0 14px}.meter span{display:block;height:100%;background:#53edff;box-shadow:0 0 10px #2ae8ff}.decision p,.question p,.energy-core p,.control p,.health p{color:#9dc5cf;line-height:1.5}.proposal{padding:10px 12px;background:#06222c;border-left:2px solid #50e9ff;color:#c8f8ff;margin-top:12px}.meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:#4fa3b3;font-family:monospace;font-size:10px;margin-top:13px}
         .answer-row input{flex:1;min-width:180px}.mic-btn{border-radius:999px;border-color:#69f2ff;box-shadow:0 0 14px #00d9ff44;background:radial-gradient(circle,#0b3444,#041018)}.big-mic{min-width:112px}.quick-row{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.quick{padding:7px 10px;font-size:11px}.question-focus{display:grid;grid-template-columns:120px 1fr;gap:18px;align-items:start}.question-radar{position:relative;width:108px;height:108px;border-radius:50%;border:1px solid #69efff99;display:grid;place-items:center;background:radial-gradient(circle,#0bdcff24 0,#031018 58%,transparent 59%);box-shadow:0 0 25px #00dcff22,inset 0 0 25px #00dcff18}.radar-ring{position:absolute;border:1px solid #43e8ff66;border-radius:50%}.rr1{inset:12%;border-style:dashed;animation:spin 9s linear infinite}.rr2{inset:28%;animation:spin 5s linear reverse infinite}.radar-value{font:700 20px monospace;color:#c9fbff;text-shadow:0 0 12px #56eaff}.question-block{margin:10px 0;padding:9px 12px;border-left:2px solid #28dff2;background:linear-gradient(90deg,#09202a88,transparent)}.question-block span{display:block;font-size:9px;letter-spacing:.18em;color:#49c6dc}.question-block p{margin:5px 0}.question-block.ask{border-left-color:#fff}.question-block.why{border-left-color:#6ff7d0}.hint{font-size:12px;color:#7db5c0;font-style:italic;margin:8px 0}.energy-core{display:flex;align-items:center;gap:35px}.orb{width:150px;height:150px;border-radius:50%;border:1px solid #4dedff;display:grid;place-items:center;box-shadow:0 0 30px #00d9ff45,inset 0 0 35px #00d9ff25;flex:0 0 auto}.orb-core{width:48px;height:48px;border-radius:50%;background:#c9fbff;box-shadow:0 0 50px #16e5ff}.energy-data{flex:1}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metrics.compact b{font-size:19px}.status{font-family:monospace;color:#6ff6cb}.model pre{white-space:pre-wrap;max-height:310px;overflow:auto;color:#7eb9c5;font-size:11px}.empty{padding:30px;color:#6c9da8;border:1px dashed #1bd5ef35;border-radius:10px}
         .health.ok{border-color:#5dffc16b}.health.warn{border-color:#ffc95d59}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:10px 0}.form-grid.one{grid-template-columns:1fr auto}.form-grid label{font-size:11px;color:#68c9da;letter-spacing:.08em}.form-grid label input,.form-grid label select{margin-top:5px}.timeline{display:grid;gap:7px;margin-top:12px}.timeline div{display:flex;justify-content:space-between;gap:15px;padding:9px;border-bottom:1px solid #1cdff322}.timeline span{color:#7bbcca;font-size:12px}
-        @media(max-width:800px){.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:240px;gap:20px;padding:18px}.jarvis{width:115px;height:115px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
+        @media(max-width:800px){.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:310px;gap:18px;padding:18px;flex-direction:column}.jarvis{width:175px;height:175px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
       </style>
       <div class="shell">
         <nav>${tabs.map(([id,label])=>`<button data-tab="${id}" class="${this._tab===id?"active":""}">${label}</button>`).join("")}</nav>
