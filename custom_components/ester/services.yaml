@@ -190,3 +190,25 @@ remove_usage_profile:
       name: "profile_id"
       selector:
         text: {}
+
+answer_question:
+  name: "Rispondi a E.S.T.E.R."
+  description: "Risponde a una domanda aperta e salva ciò che può essere appreso in modo sicuro."
+  fields:
+    question_id:
+      name: "ID domanda"
+      selector:
+        text: {}
+    answer:
+      name: "Risposta"
+      selector:
+        text:
+          multiline: true
+dismiss_question:
+  name: "Ignora domanda"
+  description: "Archivia una domanda senza creare memoria."
+  fields:
+    question_id:
+      name: "ID domanda"
+      selector:
+        text: {}

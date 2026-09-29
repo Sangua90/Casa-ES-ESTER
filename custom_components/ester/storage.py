@@ -26,6 +26,8 @@ class EsterStorage:
             "classifications": {},
             "learning": {},
             "usage_profiles": [],
+            "questions": [],
+            "knowledge": [],
         }
 
     async def async_load(self) -> None:

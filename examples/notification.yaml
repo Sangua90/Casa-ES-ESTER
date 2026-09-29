@@ -1,5 +1,5 @@
-# Esempio opzionale: importa come automazione solo se desideri notifiche.
-# Non viene installato o attivato dall'integrazione.
+# Esempio opzionale: importa come automazione se desideri notifiche.
+# Non viene installato o attivato automaticamente.
 alias: E.S.T.E.R. - domanda Shadow
 triggers:
   - trigger: event
@@ -7,9 +7,12 @@ triggers:
 actions:
   - action: persistent_notification.create
     data:
-      notification_id: ester_shadow_question
-      title: E.S.T.E.R. - Shadow Mode
+      notification_id: "ester_question_{{ trigger.event.data.question_id }}"
+      title: "E.S.T.E.R. — richiede input"
       message: >-
         {{ trigger.event.data.title }}:
-        {{ trigger.event.data.evidence.question or trigger.event.data.reasoning }}
-mode: single
+        {{ trigger.event.data.prompt }}
+        Confidence {{ (trigger.event.data.confidence * 100) | round }}%.
+        Apri la dashboard E.S.T.E.R. e rispondi nel campo Answer current question.
+mode: queued
+max: 10

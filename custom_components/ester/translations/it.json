@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "E.S.T.E.R.",
-        "description": "V1 Shadow Mode: osserva e propone, senza comandare dispositivi. Elaborazione locale; AI disabilitata per impostazione predefinita."
+        "description": "V1.2 Shadow Mode: osserva e propone, senza comandare dispositivi. Elaborazione locale; AI disabilitata per impostazione predefinita."
       }
     },
     "abort": {

@@ -1,52 +1,147 @@
 title: E.S.T.E.R.
 views:
-  - title: Shadow
-    path: shadow
-    icon: mdi:brain
+  - title: CORE
+    path: core
+    icon: mdi:radar
     cards:
       - type: markdown
-        content: >-
-          ## E.S.T.E.R. — Shadow Mode
-          Osservazioni e proposte: nessun comando ai dispositivi.
-          I nomi delle entità qui sotto vanno adattati agli ID della tua installazione.
-      - type: entities
-        entities:
-          - sensor.e_s_t_e_r_status
-          - sensor.e_s_t_e_r_observed_entities
-          - sensor.e_s_t_e_r_shadow_decisions
-          - sensor.e_s_t_e_r_questions
-          - sensor.e_s_t_e_r_summary
+        theme: E.S.T.E.R. HUD
+        content: |
+          # E.S.T.E.R.
+          **EVERYTHING SEEMS TOTALLY EASY, RIGHT?**
+          
+          `SHADOW CORE // OBSERVE • LEARN • ASK • EXPLAIN`
+          
+          Nessun comando reale ai dispositivi. Le decisioni restano simulate.
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: tile
+            theme: E.S.T.E.R. HUD
+            entity: sensor.e_s_t_e_r_status
+            name: CORE STATUS
+            icon: mdi:brain
+          - type: tile
+            theme: E.S.T.E.R. HUD
+            entity: sensor.e_s_t_e_r_questions
+            name: OPEN QUESTIONS
+            icon: mdi:message-question-outline
+          - type: tile
+            theme: E.S.T.E.R. HUD
+            entity: sensor.e_s_t_e_r_shadow_decisions
+            name: DECISIONS
+            icon: mdi:vector-polyline
+          - type: tile
+            theme: E.S.T.E.R. HUD
+            entity: sensor.e_s_t_e_r_observed_entities
+            name: OBSERVED NODES
+            icon: mdi:access-point-network
+      - type: shortcut
+        theme: E.S.T.E.R. HUD
+        label: TALK TO E.S.T.E.R.
+        description: Apre Assist con ascolto vocale
+        icon: mdi:microphone
+        color: cyan
+        tap_action:
+          action: assist
+          pipeline_id: preferred
+          start_listening: true
       - type: markdown
-        title: Domande aperte
-        content: >-
-          {% for item in state_attr('sensor.e_s_t_e_r_questions', 'items') or [] %}
-          **{{ item.title }}** — {{ item.evidence.question or item.reasoning }}
-
-          {% endfor %}
-      - type: markdown
-        title: Ultime proposte
+        theme: E.S.T.E.R. HUD
+        title: LIVE DECISION FEED
         content: >-
           {% for item in state_attr('sensor.e_s_t_e_r_shadow_decisions', 'latest') or [] %}
-          **{{ item.title }}** ({{ (item.confidence * 100) | round }}%, rischio {{ item.risk }})
-
+          **{{ item.title }}** · {{ (item.confidence * 100) | round }}% · {{ item.risk | upper }}
+          
           {{ item.reasoning }}
+          
+          ---
+          {% else %}
+          Nessuna proposta Shadow disponibile.
+          {% endfor %}
 
+  - title: QUESTIONS
+    path: questions
+    icon: mdi:message-processing-outline
+    cards:
+      - type: markdown
+        theme: E.S.T.E.R. HUD
+        content: |
+          # QUESTION INBOX
+          Rispondi alla domanda più vecchia nel campo sotto.
+          Le risposte chiare diventano memoria strutturata; quelle ambigue vengono conservate come conoscenza senza creare automaticamente regole.
+      - type: entities
+        theme: E.S.T.E.R. HUD
+        title: RESPONSE CHANNEL
+        entities:
+          - entity: text.e_s_t_e_r_answer_current_question
+            name: Risposta alla domanda corrente
+      - type: markdown
+        theme: E.S.T.E.R. HUD
+        title: OPEN QUESTIONS
+        content: >-
+          {% for item in state_attr('sensor.e_s_t_e_r_questions', 'items') or [] %}
+          ### {{ loop.index }} · {{ item.title }}
+          **Domanda:** {{ item.prompt }}
+          
+          **Perché:** {{ item.reasoning }}
+          
+          **Confidence:** {{ (item.confidence * 100) | round }}% · **Rischio:** {{ item.risk }}
+          
+          `ID {{ item.question_id }}`
+          
+          ---
+          {% else %}
+          **Inbox vuota.** E.S.T.E.R. al momento non richiede informazioni.
+          {% endfor %}
+      - type: shortcut
+        theme: E.S.T.E.R. HUD
+        label: RISPOSTA VOCALE
+        description: Apre Assist; la dettatura può essere usata per formulare la risposta
+        icon: mdi:account-voice
+        color: cyan
+        tap_action:
+          action: assist
+          pipeline_id: preferred
+          start_listening: true
+
+  - title: LEARNING
+    path: learning
+    icon: mdi:chart-timeline-variant-shimmer
+    cards:
+      - type: tile
+        theme: E.S.T.E.R. HUD
+        entity: sensor.e_s_t_e_r_summary
+        name: HOME MODEL
+        icon: mdi:home-analytics
+      - type: markdown
+        theme: E.S.T.E.R. HUD
+        title: EXPECTED USE
+        content: >-
+          {% set usage = state_attr('sensor.e_s_t_e_r_summary', 'usage') or {} %}
+          {% for area, data in usage.items() %}
+          **{{ area | upper }}** · uso atteso {{ (data.expected_occupancy * 100) | round }}%
+          
+          {% if data.upcoming %}Prossimo uso: {{ data.upcoming[0].label }} tra {{ data.upcoming[0].minutes_until }} min{% endif %}
+          
+          ---
+          {% else %}
+          Nessun profilo d'uso attivo nelle prossime due ore.
           {% endfor %}
       - type: markdown
-        title: Come migliorare E.S.T.E.R.
+        theme: E.S.T.E.R. HUD
+        title: DATA GAPS
         content: >-
           {% set items = state_attr('sensor.e_s_t_e_r_data_suggestions', 'items') or [] %}
           {% for item in items %}
-          ### {{ item.area_name }} — {{ item.missing_data }}
-
-          **Utilità:** {{ item.benefit }}
-
-          **Prossimo passo:** {{ item.next_step }}
-
-          {% if item.unassigned_candidates %}Entità da verificare: {{ item.unassigned_candidates | join(', ') }}{% endif %}
-
-          _Priorità: {{ item.priority }}. Spiegazione AI opzionale: ester.explain_decision, ID {{ item.decision_id }}._
-
+          **{{ item.area_name }} // {{ item.missing_data }}**
+          
+          {{ item.benefit }}
+          
+          → {{ item.next_step }}
+          
+          ---
           {% else %}
-          Nessuna lacuna rilevata dai controlli attuali. La copertura dipende dalle stanze e dai dispositivi associati.
+          Nessuna lacuna rilevata dai controlli attuali.
           {% endfor %}

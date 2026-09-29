@@ -47,7 +47,7 @@ class EsterBaseSensor(CoordinatorEntity[EsterCoordinator], SensorEntity):
             "name": "E.S.T.E.R.",
             "manufacturer": "Casa ES",
             "model": "Intelligent Home Manager",
-            "sw_version": "1.1.0",
+            "sw_version": "1.2.0",
         }
 
 
@@ -132,15 +132,12 @@ class EsterQuestionsSensor(EsterBaseSensor):
 
     @property
     def native_value(self) -> int:
-        latest = (self.coordinator.data or {}).get("latest_decisions", [])
-        return sum(1 for item in latest if item.get("status") == "needs_input")
+        return len((self.coordinator.data or {}).get("questions", []))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        latest = (self.coordinator.data or {}).get("latest_decisions", [])
-        return {
-            "items": [item for item in latest if item.get("status") == "needs_input"][:20]
-        }
+        questions = (self.coordinator.data or {}).get("questions", [])
+        return {"items": questions[:20]}
 
 class EsterSummarySensor(EsterBaseSensor):
     """Compact UI summary, with full details available through get_summary."""
@@ -161,7 +158,9 @@ class EsterSummarySensor(EsterBaseSensor):
         return {"rooms": {key: {"name": r["name"], "entities": len(r["entities"])} for key, r in data.get("rooms", {}).items()},
                 "contexts": [{k: c.get(k) for k in ("event_id", "label", "mode", "ends_at")} for c in data.get("contexts", [])],
                 "history": data.get("history", {}), "usage": data.get("usage", {}), "evaluated_at": data.get("evaluated_at"),
-                "learning_entities": data.get("learning_entities", 0)}
+                "learning_entities": data.get("learning_entities", 0),
+                "open_questions": len(data.get("questions", [])),
+                "usage_profiles": len(data.get("usage_profiles", []))}
 
 class EsterDataSuggestionsSensor(EsterBaseSensor):
     """Missing data and useful sensor types, without product endorsements."""

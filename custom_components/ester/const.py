@@ -2,9 +2,9 @@
 
 DOMAIN = "ester"
 NAME = "E.S.T.E.R."
-VERSION = "1.0.0"
+VERSION = "1.2.0"
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "text"]
 
 CONF_SHADOW_MODE = "shadow_mode"
 DEFAULT_SHADOW_MODE = True

@@ -19,7 +19,7 @@ async def async_setup_entry(hass, entry):
     coordinator = EsterCoordinator(hass, entry, storage)
     entry.runtime_data = coordinator
     await coordinator.async_config_entry_first_refresh()
-    await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
+    await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR, Platform.TEXT])
     entry.async_on_unload(entry.add_update_listener(_reload))
     return True
 
@@ -29,7 +29,7 @@ async def _reload(hass, entry):
 
 
 async def async_unload_entry(hass, entry):
-    if await hass.config_entries.async_unload_platforms(entry, [Platform.SENSOR]):
+    if await hass.config_entries.async_unload_platforms(entry, [Platform.SENSOR, Platform.TEXT]):
         async with entry.runtime_data.storage.lock:
             await entry.runtime_data.storage.async_save()
         return True

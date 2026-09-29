@@ -18,6 +18,7 @@ policies = importlib.import_module("ester_core.policies")
 Engine = importlib.import_module("ester_core.decision_engine").EsterDecisionEngine
 quality = importlib.import_module("ester_core.quality")
 usage = importlib.import_module("ester_core.usage")
+questions = importlib.import_module("ester_core.questions")
 NOW = datetime(2026, 9, 29, 12, tzinfo=timezone.utc)
 
 
@@ -172,6 +173,35 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(proposal.proposed_action, "Valutare pre-climatizzazione")
         self.assertEqual(proposal.outcome["type"], "not_executed")
 
+
+    def test_question_inbox_deduplicates_and_learns_comfort(self):
+        decision = {
+            "decision_id": "d1", "category": "climate", "area_id": "room",
+            "title": "Comfort da definire", "reasoning": "Serve un target",
+            "confidence": 0.4, "risk": "medium",
+            "evidence": {"question": "Quale temperatura desideri?"},
+        }
+        inbox, created = questions.merge_questions([], [decision], NOW)
+        self.assertEqual(len(created), 1)
+        inbox, created_again = questions.merge_questions(inbox, [decision], NOW + timedelta(minutes=5))
+        self.assertEqual(created_again, [])
+        data = {"questions": inbox, "preferences": {}, "knowledge": []}
+        interpretation = questions.apply_answer(data, inbox[0]["question_id"], "Preferisco 21 gradi", NOW)
+        self.assertEqual(interpretation["kind"], "preference")
+        self.assertEqual(data["preferences"]["comfort:room"], 21)
+        self.assertEqual(data["questions"][0]["status"], "answered")
+
+    def test_ambiguous_answer_becomes_knowledge_not_rule(self):
+        q = {
+            "question_id": "q1", "category": "presence", "area_id": "room",
+            "title": "Uso stanza", "prompt": "La stanza è usata?", "status": "open",
+        }
+        data = {"questions": [q], "preferences": {}, "knowledge": []}
+        result = questions.apply_answer(data, "q1", "Di solito qui si legge dopo cena", NOW)
+        self.assertEqual(result["kind"], "knowledge_note")
+        self.assertEqual(result["scope"], "persistent")
+        self.assertEqual(len(data["knowledge"]), 1)
+        self.assertEqual(data["preferences"], {})
 
 if __name__ == "__main__":
     unittest.main()

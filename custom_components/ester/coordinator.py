@@ -19,6 +19,7 @@ from .usage import usage_snapshot
 from .policies import evaluate
 from .quality import data_suggestions
 from .models import RiskLevel, ImpactLevel
+from .questions import merge_questions
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -97,11 +98,13 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 latest.append(payload)
                 events.append(payload)
             del journal[:-MAX_DECISIONS]
+            questions, new_questions = merge_questions(data.setdefault("questions", []), latest, now)
+            data["questions"] = questions
             await self.storage.async_save()
         for payload in events:
             self.hass.bus.async_fire(EVENT_DECISION, payload)
-            if payload["status"] == "needs_input":
-                self.hass.bus.async_fire(EVENT_QUESTION, payload)
+        for question in new_questions:
+            self.hass.bus.async_fire(EVENT_QUESTION, question)
         inventory = summarize_inventory(profiles)
         for suggestion in suggestions:
             suggestion["decision_id"] = next(d["decision_id"] for d in latest
@@ -110,6 +113,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
         return {"inventory": inventory, "rooms": home_model(profiles, learning),
                 "profiles": {p.entity_id: p.as_dict() for p in profiles}, "latest_decisions": latest,
                 "decision_count": len(journal), "contexts": contexts, "usage": usage,
+                "questions": [q for q in data.get("questions", []) if q.get("status") == "open"],
                 "usage_profiles": data.get("usage_profiles", []),
                 "history": {k: v for k, v in history.items() if k not in {"samples", "statistics"}},
                 "learning_entities": len(learning), "data_suggestions": suggestions, "evaluated_at": now.isoformat()}
