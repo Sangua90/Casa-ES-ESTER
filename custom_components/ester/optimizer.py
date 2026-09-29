@@ -53,15 +53,21 @@ def score_decision(decision: dict, preferences: dict) -> dict:
         "equipment": profile["equipment"] * weights["equipment"],
         "confidence": confidence * weights["confidence"],
     }
-    positive = sum(components.values()) / max(0.001, sum(weights.values()))
-    penalty = RISK_PENALTY.get(decision.get("risk", "medium"), 0.10)
-    if decision.get("status") == "needs_input":
-        penalty += 0.15
-    score = max(0.0, min(1.0, positive - penalty))
+    objective_weights = {k: v for k, v in weights.items() if k != "confidence"}
+    objective_sum = sum(
+        components[k] for k in ("safety", "comfort", "cost", "energy", "equipment")
+    )
+    importance = objective_sum / max(0.001, sum(objective_weights.values()))
+    priority_score = max(0.0, min(1.0, 0.75 * importance + 0.25 * confidence))
+    risk_penalty = RISK_PENALTY.get(decision.get("risk", "medium"), 0.10)
+    input_penalty = 0.15 if decision.get("status") == "needs_input" else 0.0
+    execution_readiness = max(0.0, min(1.0, confidence - risk_penalty - input_penalty))
     return {
-        "score": round(score, 3),
+        "score": round(priority_score, 3),
+        "priority_score": round(priority_score, 3),
+        "execution_readiness": round(execution_readiness, 3),
         "components": {k: round(v, 3) for k, v in components.items()},
-        "risk_penalty": round(penalty, 3),
+        "risk_penalty": round(risk_penalty + input_penalty, 3),
         "weights": weights,
         "objective": "whole_home",
     }
