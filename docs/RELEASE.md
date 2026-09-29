@@ -22,6 +22,9 @@ Questa release completa il livello di validazione prima dell'autonomia, mantenen
 - Editor routine d'uso casa.
 - Editor carichi energetici gestiti.
 - Wizard classificazione entità e dati mancanti.
+- Question Inbox guidata: osservazione, informazione mancante, motivo della domanda, esempi e risposte rapide.
+- Dettatura vocale nei campi; fallback Assist nativo nel Companion App con collegamento alla domanda selezionata.
+- Redesign del centro di controllo con strumentazione circolare/olografica ispirata al linguaggio HUD di JARVIS, senza asset Marvel.
 - Replay e scenari avviabili dal pannello.
 - Snapshot e rollback direttamente dal pannello.
 - Export/import JSON della memoria.
