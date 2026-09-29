@@ -20,6 +20,8 @@ from .policies import evaluate
 from .quality import data_suggestions
 from .models import RiskLevel, ImpactLevel
 from .questions import merge_questions
+from .thermal import build_room_thermal_model
+from .outcomes import evaluate_shadow_outcomes, calibration
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,9 +60,31 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 if stats:
                     learning[p.entity_id]["statistics"] = {"buckets": len(stats), "latest": stats[-1], "source": "recorder_hourly"}
             data["learning"] = learning
+            # Build a local thermal history per room from live measured temperatures and climate activity.
+            thermal_samples = data.setdefault("room_thermal_samples", {})
+            rooms = sorted({p.area_id for p in profiles if p.area_id})
+            for area in rooms:
+                local = [p for p in profiles if p.area_id == area]
+                temps = [sample_value(p) for p in local if p.role == "temperature" and sample_value(p) is not None]
+                climates = [p for p in local if p.role == "climate"]
+                if not temps:
+                    continue
+                active = any(
+                    p.attributes.get("hvac_action") in {"heating", "cooling"}
+                    or p.state in {"heat", "cool"}
+                    for p in climates
+                )
+                points = thermal_samples.setdefault(area, [])
+                points.append({"t": now.timestamp(), "temp": sum(temps) / len(temps), "active": active})
+                thermal_samples[area] = [s for s in points if now.timestamp() - s["t"] <= 14 * 86400][-2000:]
+            data["thermal_models"] = {
+                area: build_room_thermal_model(points)
+                for area, points in thermal_samples.items()
+            }
+
             contexts = active_contexts(data["context_events"], now)
             usage = usage_snapshot(data.get("usage_profiles", []), now, ZoneInfo(self.hass.config.time_zone))
-            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage)
+            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage, data["thermal_models"])
             suggestions = data_suggestions(profiles)
             for suggestion in suggestions:
                 proposal = self.engine.build_decision(category="model", title=suggestion["title"],
@@ -98,6 +122,9 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 latest.append(payload)
                 events.append(payload)
             del journal[:-MAX_DECISIONS]
+            current_numeric = {p.entity_id: sample_value(p) for p in profiles}
+            evaluate_shadow_outcomes(journal, current_numeric, now)
+            data["calibration"] = calibration(data.get("feedback", []))
             questions, new_questions = merge_questions(data.setdefault("questions", []), latest, now)
             data["questions"] = questions
             await self.storage.async_save()
@@ -116,4 +143,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 "questions": [q for q in data.get("questions", []) if q.get("status") == "open"],
                 "usage_profiles": data.get("usage_profiles", []),
                 "history": {k: v for k, v in history.items() if k not in {"samples", "statistics"}},
-                "learning_entities": len(learning), "data_suggestions": suggestions, "evaluated_at": now.isoformat()}
+                "learning_entities": len(learning), "data_suggestions": suggestions,
+                "thermal_models": data.get("thermal_models", {}),
+                "calibration": data.get("calibration", {}),
+                "evaluated_at": now.isoformat()}
