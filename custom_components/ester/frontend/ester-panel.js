@@ -50,42 +50,87 @@ class EsterPanel extends HTMLElement {
   async answer(questionId, quickAnswer=null) {
     const el = this.shadowRoot?.querySelector("#answer-" + CSS.escape(questionId));
     const answer = (quickAnswer ?? el?.value)?.trim();
-    if (!answer) return;
-    await this.call("ester", "answer_question", {question_id: questionId, answer});
+    if (!answer || !this._hass || this._busy) return;
+    this._busy = true;
+    this._notice = "Sto registrando la risposta…";
+    this.render();
+    try {
+      const result = await this._hass.callWS({
+        type:"call_service",
+        domain:"ester",
+        service:"answer_question",
+        service_data:{question_id:questionId, answer},
+        return_response:true
+      });
+      const response = result?.response || result || {};
+      this._notice = response?.interpretation?.summary
+        ? "Capito: " + response.interpretation.summary
+        : "Risposta registrata.";
+      await this._hass.callService("ester","evaluate",{});
+    } catch (err) {
+      this._notice = "Risposta non registrata: " + (err?.message || "errore");
+    } finally {
+      this._busy = false;
+      this.render();
+    }
   }
 
   async startSpeech(targetId) {
     const target = this.shadowRoot?.querySelector("#" + CSS.escape(targetId));
-    if (!target) return;
+    if (!target || !this._hass) return;
+
+    const questionId = targetId.startsWith("answer-") ? targetId.slice(7) : null;
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
-      recognition.lang = (this._hass?.language || "it").startsWith("it") ? "it-IT" : (this._hass?.language || "it-IT");
+      recognition.lang = (this._hass.language || "it").startsWith("it") ? "it-IT" : (this._hass.language || "it-IT");
       recognition.interimResults = true;
       recognition.continuous = false;
-      target.placeholder = "Sto ascoltando...";
-      recognition.onresult = (event) => {
+      this._notice = "Ti ascolto…";
+      this.render();
+
+      recognition.onresult = async (event) => {
         let text = "";
-        for (let i=event.resultIndex;i<event.results.length;i++) text += event.results[i][0].transcript;
+        let final = false;
+        for (let i=event.resultIndex;i<event.results.length;i++) {
+          text += event.results[i][0].transcript;
+          final = final || event.results[i].isFinal;
+        }
         target.value = text.trim();
+        if (final && text.trim()) {
+          if (questionId) await this.answer(questionId, text.trim());
+          else {
+            this._notice = "Ho sentito: «" + text.trim() + "»";
+            await this.call("ester","interpret_message",{message:text.trim()});
+          }
+        }
       };
-      recognition.onerror = () => { target.placeholder = "Microfono non disponibile: scrivi oppure usa Assist"; };
-      recognition.onend = () => { if (!target.value) target.placeholder = "Scrivi o usa il microfono..."; };
+      recognition.onerror = () => {
+        this._notice = "Il browser non riesce ad accedere al microfono. Prova dall'app Home Assistant con Assist.";
+        this.render();
+      };
       recognition.start();
       return;
     }
-    if (this._hass?.auth?.external?.config?.hasAssist) {
-      if (targetId.startsWith("answer-")) {
-        const question_id = targetId.slice(7);
-        await this._hass.callService("ester", "select_voice_question", {question_id});
+
+    if (this._hass.auth?.external?.config?.hasAssist) {
+      if (questionId) {
+        await this._hass.callService("ester","select_voice_question",{question_id:questionId});
       }
       this._hass.auth.external.fireMessage({
         type:"assist/show",
         payload:{pipeline_id:"preferred",start_listening:true}
       });
+      this._notice = questionId
+        ? "Parla: la prossima frase verrà usata come risposta a questa domanda."
+        : "Parla con E.S.T.E.R. tramite Assist.";
+      this.render();
       return;
     }
-    target.placeholder = "Il browser non supporta la dettatura. Usa Assist o scrivi la risposta.";
+
+    this._notice = "Microfono non disponibile in questo browser. Nell'app Home Assistant puoi usare Assist.";
+    this.render();
   }
 
   async replay(days) {
