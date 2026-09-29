@@ -8,7 +8,7 @@
   "issue_tracker": "https://github.com/Sangua90/Casa-ES-ESTER/issues",
   "iot_class": "local_polling",
   "version": "1.3.0",
-  "dependencies": ["conversation"],
+  "dependencies": ["conversation", "frontend", "http"],
   "after_dependencies": ["recorder"],
   "requirements": []
 }
