@@ -6,7 +6,8 @@ from datetime import timedelta
 from .home import number, numeric_value, timestamp
 from .models import ImpactLevel, RiskLevel
 from .thermal import compare_climate_strategies
-from .energy import energy_plan, rank_flexible_loads
+from .energy import energy_plan
+from .managed_energy import plan_managed_loads
 from .house_controls import lighting_plan, alarm_plan
 from .ventilation import ventilation_recommendation
 from .hot_water import hot_water_shadow_plan
@@ -16,12 +17,13 @@ from .occupancy import predicted_occupancy
 
 def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None,
              thermal_models=None, flexible_loads=None, local_tz=None, ventilation_models=None,
-             hot_water_models=None, occupancy_models=None):
+             hot_water_models=None, occupancy_models=None, energy_runtime=None):
     thermal_models = thermal_models or {}
     flexible_loads = flexible_loads or []
     ventilation_models = ventilation_models or {}
     hot_water_models = hot_water_models or {}
     occupancy_models = occupancy_models or {}
+    energy_runtime = energy_runtime or {}
     usage = usage or {}
     decisions = []
     rooms = sorted({p.area_id for p in profiles if p.area_id})
@@ -267,7 +269,7 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
             phase_w=[numeric_value(p) for p in phases],
             phase_limit_w=number(preferences.get("phase_limit_w")),
         )
-        ranked = rank_flexible_loads(flexible_loads, plan)
+        ranked = plan_managed_loads(loads=flexible_loads, profiles=valid, runtime=energy_runtime, energy_plan=plan, now=local_now)
         strategy_labels = {
             "protect_electrical_limits": "Proteggere i limiti elettrici",
             "preserve_battery": "Preservare la riserva batteria",
@@ -291,7 +293,7 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
             reason,
             energy_entities,
             risk="medium",
-            evidence={"energy_plan": plan, "flexible_load_ranking": ranked[:20]},
+            evidence={"energy_plan": plan, "managed_load_plan": ranked[:30]},
         )
     elif any(p.role in {"energy", "solar_power", "load_power", "grid_power", "battery_power", "phase_power", "battery"} for p in valid):
         emit(
