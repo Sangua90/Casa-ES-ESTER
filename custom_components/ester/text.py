@@ -7,10 +7,11 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .questions import apply_answer
+from .conversation import interpret_and_store
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    async_add_entities([EsterAnswerText(entry.runtime_data, entry)])
+    async_add_entities([EsterAnswerText(entry.runtime_data, entry), EsterTeachText(entry.runtime_data, entry)])
 
 
 class EsterAnswerText(CoordinatorEntity, TextEntity):
@@ -30,7 +31,7 @@ class EsterAnswerText(CoordinatorEntity, TextEntity):
             "name": "E.S.T.E.R.",
             "manufacturer": "Casa ES",
             "model": "Intelligent Home Manager",
-            "sw_version": "1.2.0",
+            "sw_version": "1.3.0",
         }
 
     def _question(self):
@@ -73,4 +74,40 @@ class EsterAnswerText(CoordinatorEntity, TextEntity):
             await self.coordinator.storage.async_save()
         self._value = ""
         await self.coordinator.async_request_refresh()
+        self.async_write_ha_state()
+
+
+class EsterTeachText(CoordinatorEntity, TextEntity):
+    _attr_has_entity_name = True
+    _attr_name = "Teach E.S.T.E.R."
+    _attr_icon = "mdi:head-cog-outline"
+    _attr_native_min = 1
+    _attr_native_max = 2000
+    _attr_mode = TextMode.TEXT
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_teach_ester"
+        self._value = ""
+        self._last_result = None
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "E.S.T.E.R.",
+            "manufacturer": "Casa ES",
+            "model": "Intelligent Home Manager",
+            "sw_version": "1.3.0",
+        }
+
+    @property
+    def native_value(self):
+        return self._value
+
+    @property
+    def extra_state_attributes(self):
+        return {"last_result": self._last_result, "shadow_mode": True, "device_action": False}
+
+    async def async_set_value(self, value: str) -> None:
+        self._last_result = await interpret_and_store(self.hass, self.coordinator, value)
+        self._value = ""
         self.async_write_ha_state()
