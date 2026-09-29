@@ -1,0 +1,20 @@
+"""Constants for E.S.T.E.R."""
+
+DOMAIN = "ester"
+NAME = "E.S.T.E.R."
+VERSION = "0.1.0"
+
+PLATFORMS = ["sensor"]
+
+CONF_SHADOW_MODE = "shadow_mode"
+DEFAULT_SHADOW_MODE = True
+
+STORAGE_VERSION = 1
+STORAGE_KEY = f"{DOMAIN}.storage"
+
+EVENT_DECISION = f"{DOMAIN}_decision"
+EVENT_QUESTION = f"{DOMAIN}_question"
+EVENT_FEEDBACK = f"{DOMAIN}_feedback"
+
+DEFAULT_EVALUATION_INTERVAL_MINUTES = 5
+MAX_DECISIONS = 500
