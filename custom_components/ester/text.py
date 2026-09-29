@@ -7,7 +7,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .questions import apply_answer
-from .conversation import interpret_and_store
+from .language_pipeline import interpret_and_store
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
