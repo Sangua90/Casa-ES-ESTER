@@ -96,3 +96,37 @@ def apply_interpretation(store: dict, parsed: dict, now: datetime) -> dict:
     }
     store.setdefault("knowledge", []).append(note)
     return {"applied": "knowledge_note", "knowledge": note}
+
+
+def local_interpret(message: str, area_ids: list[str]) -> dict:
+    """Small deterministic fallback for common Italian commands."""
+    text = message.strip()
+    lower = text.lower()
+    area = next((a for a in area_ids if a.lower() in lower), None)
+
+    # Comfort preference, only when an existing HA area is explicitly named.
+    import re
+    temp = re.search(r"(?<!\d)([1-3]?\d(?:[.,]\d)?)\s*(?:°|gradi|grado|c\b)", lower)
+    if area and temp and any(word in lower for word in ("voglio", "prefer", "comfort", "tieni", "tenere")):
+        value = float(temp.group(1).replace(",", "."))
+        if 5 <= value <= 35:
+            return {"intent": "preference", "key": f"comfort:{area}", "value": value,
+                    "area_id": area, "confidence": 0.96, "text": text}
+
+    modes = {
+        "vacanza": "vacation", "via": "vacation", "ospiti": "guests",
+        "malat": "illness", "lavoro da casa": "work_from_home", "smart working": "work_from_home",
+    }
+    mode = next((value for token, value in modes.items() if token in lower), None)
+    if mode:
+        hours = 24
+        if "weekend" in lower:
+            hours = 72
+        elif "stasera" in lower:
+            hours = 12
+        elif "domani" in lower:
+            hours = 36
+        return {"intent": "context", "mode": mode, "area_id": area, "duration_hours": hours,
+                "label": text[:100], "notes": text, "confidence": 0.85, "text": text}
+
+    return {"intent": "knowledge_note", "area_id": area, "text": text, "confidence": 0.6}
