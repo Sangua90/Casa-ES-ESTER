@@ -27,6 +27,7 @@ from .readiness import migration_readiness
 from .ventilation import ventilation_model
 from .hot_water import hot_water_model
 from .occupancy import occupancy_model
+from .managed_energy import update_runtime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -124,9 +125,16 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             data["occupancy_models"] = {area: occupancy_model(points, local_tz) for area, points in occupancy_samples.items()}
             data["hot_water_models"] = {area: hot_water_model(points) for area, points in hot_water_samples.items()}
 
+            update_runtime(
+                data.get("flexible_loads", []),
+                profiles,
+                data.setdefault("energy_runtime", {}),
+                now.astimezone(local_tz),
+            )
+
             contexts = active_contexts(data["context_events"], now)
             usage = usage_snapshot(data.get("usage_profiles", []), now, ZoneInfo(self.hass.config.time_zone))
-            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage, data["thermal_models"], data.get("flexible_loads", []), ZoneInfo(self.hass.config.time_zone), data.get("ventilation_models", {}), data.get("hot_water_models", {}), data.get("occupancy_models", {}))
+            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage, data["thermal_models"], data.get("flexible_loads", []), ZoneInfo(self.hass.config.time_zone), data.get("ventilation_models", {}), data.get("hot_water_models", {}), data.get("occupancy_models", {}), data.get("energy_runtime", {}))
             suggestions = data_suggestions(profiles)
             for suggestion in suggestions:
                 proposal = self.engine.build_decision(category="model", title=suggestion["title"],
