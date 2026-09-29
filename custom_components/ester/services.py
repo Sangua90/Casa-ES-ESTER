@@ -17,7 +17,7 @@ from .ai.factory import create_provider
 from .const import DOMAIN, EVENT_FEEDBACK
 from .home import MODES, ROLES
 from .usage import validate_profile
-from .questions import interpret_answer
+from .questions import apply_answer
 
 TEXT = vol.All(cv.string, vol.Length(min=1, max=2000))
 SHORT = vol.All(cv.string, vol.Length(min=1, max=100))
@@ -147,33 +147,12 @@ def register_services(hass):
         if not answer:
             raise ServiceValidationError("Answer cannot be empty")
         async with coordinator.storage.lock:
-            question = next((q for q in coordinator.storage.data.setdefault("questions", [])
-                             if q.get("question_id") == question_id), None)
-            if question is None:
-                raise ServiceValidationError("Unknown question")
-            if question.get("status") == "answered":
-                raise ServiceValidationError("Question already answered")
-            interpretation = interpret_answer(question, answer)
-            question["status"] = "answered"
-            question["answer"] = answer
-            question["interpretation"] = interpretation
-            question["updated_at"] = dt_util.utcnow().isoformat()
-            if interpretation["kind"] == "preference":
-                coordinator.storage.data.setdefault("preferences", {})[interpretation["key"]] = interpretation["value"]
-            else:
-                knowledge = coordinator.storage.data.setdefault("knowledge", [])
-                knowledge.append({
-                    "knowledge_id": str(uuid4()),
-                    "question_id": question_id,
-                    "category": interpretation.get("category"),
-                    "area_id": interpretation.get("area_id"),
-                    "text": interpretation.get("text", answer),
-                    "scope": interpretation.get("scope", "temporary"),
-                    "confidence": interpretation.get("confidence", 0.5),
-                    "created_at": dt_util.utcnow().isoformat(),
-                    "source": "user_answer",
-                })
-                del knowledge[:-500]
+            try:
+                interpretation = apply_answer(coordinator.storage.data, question_id, answer, dt_util.utcnow())
+            except KeyError:
+                raise ServiceValidationError("Unknown question") from None
+            except ValueError:
+                raise ServiceValidationError("Question already answered") from None
             await coordinator.storage.async_save()
         await coordinator.async_request_refresh()
         return {"question_id": question_id, "status": "answered", "interpretation": interpretation}
