@@ -7,11 +7,9 @@ services and therefore cannot actuate devices in Shadow Mode.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
-from homeassistant.core import HomeAssistant
-from homeassistant.util import dt as dt_util
 
 from .models import Decision, DecisionStatus, ImpactLevel, RiskLevel
 
@@ -37,7 +35,7 @@ class RiskPolicy:
 class EsterDecisionEngine:
     """Central decision engine. v0.1 generates safe shadow proposals only."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass=None) -> None:
         self.hass = hass
         self.risk_policy = RiskPolicy()
 
@@ -68,7 +66,7 @@ class EsterDecisionEngine:
 
         return Decision(
             decision_id=str(uuid4()),
-            created_at=dt_util.utcnow(),
+            created_at=datetime.now(timezone.utc),
             category=category,
             title=title,
             proposed_action=proposed_action,
