@@ -71,6 +71,7 @@ def discover_entities(hass: HomeAssistant, classifications=None) -> list[EntityP
             sensitive=domain in _SENSITIVE_DOMAINS,
             attributes={
                 **{k: state.attributes[k] for k in ("current_temperature", "temperature", "hvac_action", "state_class", "last_triggered", "current", "mode") if k in state.attributes},
+                "last_changed": state.last_changed.isoformat(),
                 "last_updated": state.last_updated.isoformat(),
                 "last_reported": state.last_reported.isoformat(),
                 "classification_source": "user" if override.get("role") else "inferred",
