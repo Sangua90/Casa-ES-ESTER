@@ -6,10 +6,95 @@ import re
 from uuid import uuid4
 
 
+
+def _friendly_question(decision: dict, prompt: str) -> dict:
+    """Turn an internal question into a concise user-facing prompt."""
+    category = decision.get("category")
+    area = decision.get("area_id")
+    area_label = (area or "casa").replace("_", " ").strip().title()
+    reasoning = decision.get("reasoning") or ""
+
+    base = {
+        "display_title": decision.get("title") or "Mi serve un'informazione",
+        "display_prompt": prompt,
+        "observed": reasoning,
+        "why_asking": "La risposta mi serve per aumentare la sicurezza della decisione e ridurre le ipotesi.",
+        "answer_hint": "Puoi rispondere con parole normali.",
+        "quick_answers": [],
+    }
+
+    p = prompt.lower()
+    if category == "climate" and ("temperatura" in p or "comfort" in p):
+        base.update({
+            "display_title": f"Comfort di {area_label}",
+            "display_prompt": f"Che temperatura vuoi normalmente in {area_label} quando la stanza è usata?",
+            "why_asking": "Senza il tuo target non posso capire se conviene riscaldare, raffrescare o aspettare.",
+            "answer_hint": "Esempio: «21 gradi» oppure «20,5 °C».",
+            "quick_answers": ["19 °C", "20 °C", "21 °C", "22 °C"],
+        })
+    elif category == "ventilation":
+        base.update({
+            "display_title": f"Ventilazione di {area_label}",
+            "display_prompt": f"La ventilazione in {area_label} serve principalmente a ridurre umidità/aria viziata?",
+            "why_asking": "Devo sapere qual è lo scopo dell'impianto prima di giudicare se sta funzionando bene.",
+            "answer_hint": "Esempio: «Sì, soprattutto dopo la doccia» oppure «No, serve per altro».",
+            "quick_answers": ["Sì", "No", "Soprattutto dopo la doccia"],
+        })
+    elif category == "presence":
+        base.update({
+            "display_title": f"Presenza in {area_label}",
+            "display_prompt": f"In {area_label} può esserci qualcuno anche se per un po' non rilevo movimento?",
+            "why_asking": "Voglio evitare di spegnere luci o cambiare comfort quando una persona è ferma o sta riposando.",
+            "answer_hint": "Esempio: «Sì, capita spesso» oppure «No, se non c'è movimento è quasi sempre vuota».",
+            "quick_answers": ["Sì, capita", "No, quasi mai"],
+        })
+    elif category == "lighting":
+        base.update({
+            "display_title": f"Luci di {area_label}",
+            "display_prompt": f"Quando non rilevo presenza in {area_label}, posso considerare la stanza vuota per le luci?",
+            "why_asking": "La sola assenza di movimento non prova sempre che la stanza sia vuota.",
+            "answer_hint": "Esempio: «Sì» oppure «No, può esserci qualcuno fermo».",
+            "quick_answers": ["Sì", "No"],
+        })
+    elif category == "security":
+        base.update({
+            "display_title": "Logica antifurto",
+            "display_prompt": "Questa proposta di armamento/disarmo corrisponde a come vuoi usare normalmente l'antifurto?",
+            "why_asking": "L'antifurto è un dominio ad alto rischio e non voglio imparare una regola sbagliata.",
+            "answer_hint": "Puoi dire cosa deve succedere, ad esempio: «Di giorno, se siamo in casa, deve essere disarmato».",
+            "quick_answers": ["Sì, è corretta", "No, va cambiata"],
+        })
+    elif category == "hot_water":
+        base.update({
+            "display_title": "Acqua calda sanitaria",
+            "display_prompt": "Qual è il target normale dell'acqua calda che vuoi usare?",
+            "why_asking": "Mi serve per confrontare disponibilità ACS, tempi di recupero, FV e costo senza toccare i cicli sanitari.",
+            "answer_hint": "Esempio: «52 gradi».",
+            "quick_answers": ["48 °C", "50 °C", "52 °C", "55 °C"],
+        })
+    elif category == "energy":
+        base.update({
+            "display_title": "Configurazione energia",
+            "display_prompt": prompt,
+            "why_asking": "Il planner energetico non deve indovinare quali contatori rappresentano FV, casa, rete, batteria o fasi.",
+            "answer_hint": "Puoi indicarmi l'entità o spiegarmi a cosa corrisponde.",
+            "quick_answers": [],
+        })
+    elif category == "irrigation":
+        base.update({
+            "display_title": f"Irrigazione di {area_label}",
+            "display_prompt": prompt,
+            "why_asking": "Voglio evitare di irrigare basandomi su una soglia non adatta alla zona.",
+            "answer_hint": "Puoi indicare la soglia o descrivere quando vuoi irrigare.",
+            "quick_answers": [],
+        })
+    return base
+
 def question_from_decision(decision: dict, now: datetime) -> dict | None:
     prompt = (decision.get("evidence") or {}).get("question")
     if not prompt:
         return None
+    friendly = _friendly_question(decision, prompt)
     return {
         "question_id": str(uuid4()),
         "decision_id": decision["decision_id"],
@@ -25,6 +110,7 @@ def question_from_decision(decision: dict, now: datetime) -> dict | None:
         "updated_at": now.isoformat(),
         "answer": None,
         "interpretation": None,
+        **friendly,
     }
 
 
