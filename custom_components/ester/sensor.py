@@ -116,7 +116,7 @@ class EsterDecisionCountSensor(EsterBaseSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
-            "latest": (self.coordinator.data or {}).get("latest_decisions", [])[-5:]
+            "latest": (self.coordinator.data or {}).get("latest_decisions", [])[-30:]
         }
 
 
@@ -161,6 +161,7 @@ class EsterSummarySensor(EsterBaseSensor):
                 "learning_entities": data.get("learning_entities", 0),
                 "open_questions": len(data.get("questions", [])),
                 "usage_profiles": len(data.get("usage_profiles", [])),
+                "preferences": data.get("preferences", {}),
                 "thermal_models": data.get("thermal_models", {}),
                 "ventilation_models": data.get("ventilation_models", {}),
                 "hot_water_models": data.get("hot_water_models", {}),
