@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from .home import number, numeric_value, timestamp
 from .models import ImpactLevel, RiskLevel
+from .thermal import compare_climate_strategies
 
 
-def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None):
+def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None, thermal_models=None):
+    thermal_models = thermal_models or {}
     usage = usage or {}
     decisions = []
     rooms = sorted({p.area_id for p in profiles if p.area_id})
@@ -76,10 +78,35 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
                 next_use = upcoming[0]
                 t = sum(numeric_value(p) for p in temps) / len(temps)
                 use_target = number(next_use.get("comfort_c")) or target
-                if use_target is not None and abs(t - use_target) >= 1 and next_use["minutes_until"] <= 90:
-                    emit("climate", "Uso stanza previsto", "Valutare pre-climatizzazione",
-                         f"Uso previsto tra {next_use['minutes_until']} minuti; temperatura {t:.1f} °C rispetto a {use_target:.1f} °C.",
-                         temps + climates + presence, risk="medium", evidence={"target_c": use_target, "expected_use": expected})
+                if use_target is not None and abs(t - use_target) >= 1 and next_use["minutes_until"] <= 120:
+                    model = thermal_models.get(area, {})
+                    strategies = compare_climate_strategies(
+                        current_c=t,
+                        target_c=use_target,
+                        minutes_until_use=next_use["minutes_until"],
+                        model=model,
+                        energy_price_eur_kwh=number(preferences.get("energy_price_eur_kwh")),
+                        estimated_power_kw=number(preferences.get(f"climate_power_kw:{area}")),
+                    )
+                    pre = next((s for s in strategies if s["strategy"] == "precondition"), None)
+                    if pre:
+                        action = f"Valutare pre-climatizzazione tra {pre['start_in_minutes']} minuti"
+                        reason = (
+                            f"Uso previsto tra {next_use['minutes_until']} minuti; temperatura {t:.1f} °C, "
+                            f"target {use_target:.1f} °C. Il modello locale stima circa "
+                            f"{pre['estimated_runtime_minutes']} minuti di climatizzazione."
+                        )
+                    else:
+                        action = "Continuare a osservare prima di pre-climatizzare"
+                        reason = (
+                            f"Uso previsto tra {next_use['minutes_until']} minuti; temperatura {t:.1f} °C, "
+                            f"target {use_target:.1f} °C. Non ci sono ancora abbastanza dati termici locali "
+                            "per stimare un anticipo affidabile."
+                        )
+                    emit("climate", "Uso stanza previsto", action, reason,
+                         temps + climates + presence, risk="medium",
+                         evidence={"target_c": use_target, "expected_use": expected,
+                                   "thermal_model": model, "strategies": strategies})
             elif "vacation" in scope_modes:
                 emit("climate", "Modalità vacanza", "Valutare un profilo di mantenimento da concordare",
                      "La vacanza cambia il comfort richiesto, ma protezione antigelo e limiti tecnici restano da verificare.",
