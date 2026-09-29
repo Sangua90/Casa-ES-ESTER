@@ -7,7 +7,7 @@ from statistics import mean
 
 ROLES = {"generic", "temperature", "humidity", "climate", "hot_water",
          "lighting", "presence", "ventilation", "irrigation", "soil_moisture",
-         "security", "energy", "solar_power", "load_power", "grid_power", "battery_power", "phase_power", "battery", "pv_forecast_power", "pv_forecast_energy", "rain", "illuminance"}
+         "security", "energy", "solar_power", "load_power", "grid_power", "battery_power", "phase_power", "battery", "pv_forecast_power", "pv_forecast_remaining_energy", "rain", "illuminance"}
 MODES = {"normal", "vacation", "guests", "illness", "work_from_home"}
 
 
@@ -82,7 +82,7 @@ def numeric_value(profile):
         return value if profile.unit == "°C" else None
     if profile.role in {"solar_power", "load_power", "grid_power", "battery_power", "phase_power", "pv_forecast_power"}:
         return value * 1000 if profile.unit == "kW" else value if profile.unit == "W" else None
-    if profile.role == "pv_forecast_energy":
+    if profile.role == "pv_forecast_remaining_energy":
         return value if profile.unit == "kWh" else value / 1000 if profile.unit == "Wh" else None
     if profile.role in {"humidity", "soil_moisture", "battery"}:
         return value if profile.unit == "%" and 0 <= value <= 100 else None
