@@ -14,9 +14,9 @@ LEARN_ROLES = {"temperature", "humidity", "hot_water", "climate", "presence", "e
 
 
 def sample_value(profile):
+    if profile.state in {"unknown", "unavailable", None}:
+        return None
     if profile.role == "presence":
-        if profile.state in {"unknown", "unavailable", None}:
-            return None
         if profile.domain in {"person", "device_tracker"}:
             return int(profile.state == "home")
         return {"on": 1, "off": 0}.get(profile.state)

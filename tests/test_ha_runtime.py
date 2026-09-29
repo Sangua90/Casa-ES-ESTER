@@ -47,7 +47,7 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(next(p for p in profiles if p.entity_id == "sensor.battery").role, "battery")
         coordinator = EsterCoordinator(self.hass, None, restored)
         # Any accidental device-service call fails this runtime test.
-        with patch.object(self.hass.services, "async_call", side_effect=AssertionError("Device services forbidden")):
+        with patch.object(type(self.hass.services), "async_call", side_effect=AssertionError("Device services forbidden")):
             first = await coordinator._async_update_data()
             second = await coordinator._async_update_data()
         self.assertEqual(first["decision_count"], second["decision_count"])

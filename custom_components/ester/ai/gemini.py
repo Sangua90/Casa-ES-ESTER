@@ -33,7 +33,8 @@ class GeminiProvider(AIProvider):
             ) as response:
                 response.raise_for_status()
                 body = await response.json()
-        parts = body.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        candidates = body.get("candidates") or [{}]
+        parts = candidates[0].get("content", {}).get("parts", [])
         text = "\n".join(p.get("text", "") for p in parts if not p.get("thought"))[:6000]
         if not text:
             raise ValueError("No text response")
