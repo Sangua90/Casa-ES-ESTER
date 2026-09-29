@@ -1,11 +1,12 @@
-## E.S.T.E.R. 1.1.0 — Shadow Mode + uso previsto degli spazi
+## E.S.T.E.R. 1.2.0 — Question Inbox + HUD
 
-Aggiornamento installabile da HACS.
+- Inbox persistente delle domande con ID, stato, confidence, rischio e collegamento alla decisione.
+- Nuovo campo Home Assistant "Answer current question" per rispondere direttamente dalla dashboard.
+- Le risposte chiare possono diventare memoria strutturata (per esempio comfort stanza); quelle ambigue restano conoscenza e non creano regole automatiche.
+- Le domande già risposte o ignorate non vengono riproposte immediatamente.
+- Dashboard E.S.T.E.R. HUD scura/ciano con CORE, QUESTIONS e LEARNING.
+- Pulsante microfono basato sull'azione Assist nativa di Home Assistant.
+- Tema E.S.T.E.R. HUD incluso come esempio.
+- Restano Recorder, uso previsto degli spazi, Shadow decisions, feedback e Gemini opzionale.
 
-- Aggiunge profili persistenti per insegnare a E.S.T.E.R. come prevedi di usare ogni stanza: giorni, orari, probabilità d'uso e comfort.
-- Le routine vengono combinate con presenza reale, contesti temporanei e storico; vacanza/ospiti/malattia restano eccezioni separate.
-- Il motore clima può proporre in Shadow Mode una pre-climatizzazione fino a 90 minuti prima di un uso previsto.
-- Il riepilogo espone routine salvate e stato d'uso corrente/prossimo.
-- Restano inclusi Recorder/statistiche, motori Shadow, feedback, suggerimenti dati e Gemini opzionale.
-
-**Nessuna attuazione reale sui dispositivi.** Richiede Home Assistant 2026.9.4 o successivo.
+**Nessuna attuazione reale sui dispositivi.** Home Assistant 2026.9.4 o successivo.
