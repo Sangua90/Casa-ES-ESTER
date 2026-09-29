@@ -1,26 +1,38 @@
-## E.S.T.E.R. 1.3.0 — Pre-Final Shadow
+## E.S.T.E.R. 1.4.0 — Pre-Autonomy Shadow
 
-Versione pensata per portare il cervello di E.S.T.E.R. vicino alla futura modalità autonoma, mantenendo **zero attuazione reale**.
+Questa release completa il livello di validazione prima dell'autonomia, mantenendo **zero attuazione reale**.
 
-- Agente conversazionale nativo Home Assistant selezionabile in Assist.
-- Parser locale + Gemini opzionale per interpretare preferenze, contesti, routine e note.
-- Gemini non decide dispositivi: i calcoli restano locali e deterministici.
-- Modello termico empirico per stanza e pre-climatizzazione predittiva.
-- Modello di occupazione per giorno/ora combinato con routine dichiarate.
-- Apprendimento dell'efficacia della ventilazione.
-- Modello ACS locale di calo/recupero.
-- Confronto economico PDC/gas con tariffe e COP configurabili.
-- Planner energia locale con FV, carico, rete, SOC, target batteria, riserva, limiti inverter/fasi e forecast.
-- Carichi flessibili con potenza, durata, priorità, SOC minimo e interrompibilità.
-- Outcome learning e calibrazione da feedback.
-- Inventario automazioni legacy e stato di prontezza alla migrazione per categoria.
-- Planner Shadow per luci e antifurto.
-- Export della memoria E.S.T.E.R.
-- Centro di controllo nativo nel menu laterale di Home Assistant, stile JARVIS, con CORE, DECISIONI, DOMANDE, ENERGIA, APPRENDIMENTO e MIGRAZIONE.
-- Gestione carichi energia con fase, priorità, SOC minimo, finestre orarie, tempi minimi ON/OFF, massimo avvii e non-interrompibilità.
+### Validazione
+- Replay Recorder da 1 a 30 giorni, con checkpoint e statistiche su decisioni/confidence/rischio.
+- What-if per modalità casa, comfort e costo energia senza persistenza.
+- KPI Shadow, confidence media, feedback quality, domande e anomalie.
+- Autonomy Health per energia, clima, sicurezza, ACS e ventilazione.
 
-Le automazioni esistenti e Casa ES Energy Manager **non vengono modificati o disattivati**. La migrazione resta manuale e progressiva.
+### Decisione
+- Planner multi-obiettivo whole-home.
+- Pesi regolabili: sicurezza, comfort, costo, energia, usura apparati, confidence.
+- Priorità decisione separata dalla readiness all'esecuzione.
+- Confidence calibrata con feedback per dominio.
+- Forecast giornaliero locale e stagionalità automatica.
+- Errore di previsione osservabile quando disponibile; nessuna causalità inventata.
 
-**Ultimo passo futuro:** introdurre un executor controllato e togliere Shadow per domini validati. Questa release non contiene tale executor.
+### Interfaccia
+- Centro E.S.T.E.R. laterale con CORE, DECISIONI, DOMANDE, ENERGIA, APPRENDIMENTO, VALIDAZIONE, MIGRAZIONE e CONFIG.
+- Storico decisioni filtrabile.
+- Editor routine d'uso casa.
+- Editor carichi energetici gestiti.
+- Wizard classificazione entità e dati mancanti.
+- Replay e scenari avviabili dal pannello.
+- Snapshot e rollback direttamente dal pannello.
+- Export/import JSON della memoria.
+
+### Sicurezza
+- Le automazioni legacy restano attive.
+- Casa ES Energy Manager non viene disattivato automaticamente.
+- Nessuna automazione viene rimossa automaticamente.
+- Nessun servizio HA di attuazione viene chiamato.
+- L'executor reale non esiste in questa release.
+
+**L'unico salto architetturale ancora escluso è la futura rimozione controllata dello Shadow Mode.**
 
 Richiede Home Assistant 2026.9.4 o successivo.
