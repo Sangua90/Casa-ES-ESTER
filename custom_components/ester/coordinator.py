@@ -15,6 +15,7 @@ from .decision_engine import EsterDecisionEngine
 from .discovery import discover_entities, summarize_inventory
 from .history import HistoryReader, sample_value
 from .home import active_contexts, home_model, learn, occupancy_learning, timestamp
+from .usage import usage_snapshot
 from .policies import evaluate
 from .quality import data_suggestions
 from .models import RiskLevel, ImpactLevel
@@ -57,7 +58,8 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                     learning[p.entity_id]["statistics"] = {"buckets": len(stats), "latest": stats[-1], "source": "recorder_hourly"}
             data["learning"] = learning
             contexts = active_contexts(data["context_events"], now)
-            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now)
+            usage = usage_snapshot(data.get("usage_profiles", []), now, ZoneInfo(self.hass.config.time_zone))
+            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage)
             suggestions = data_suggestions(profiles)
             for suggestion in suggestions:
                 proposal = self.engine.build_decision(category="model", title=suggestion["title"],
@@ -107,6 +109,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
         inventory.update(unassigned_entities=sum(not p.area_id for p in profiles), shadow_mode=True)
         return {"inventory": inventory, "rooms": home_model(profiles, learning),
                 "profiles": {p.entity_id: p.as_dict() for p in profiles}, "latest_decisions": latest,
-                "decision_count": len(journal), "contexts": contexts,
+                "decision_count": len(journal), "contexts": contexts, "usage": usage,
+                "usage_profiles": data.get("usage_profiles", []),
                 "history": {k: v for k, v in history.items() if k not in {"samples", "statistics"}},
                 "learning_entities": len(learning), "data_suggestions": suggestions, "evaluated_at": now.isoformat()}
