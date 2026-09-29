@@ -49,7 +49,7 @@ def energy_plan(*, now: datetime, target: datetime, pv_w: float | None, load_w: 
                 target_soc: float | None, reserve_soc: float | None, forecast_curve: list[dict] | None,
                 base_load_w: float | None, grid_limit_w: float | None,
                 inverter_limit_w: float | None, phase_w: list[float] | None = None,
-                phase_limit_w: float | None = None) -> dict:
+                phase_limit_w: float | None = None, forecast_remaining_kwh: float | None = None) -> dict:
     """Return a read-only energy strategy with deterministic guardrails."""
     pv = max(0.0, _num(pv_w) or 0.0)
     load = max(0.0, _num(load_w) or 0.0)
@@ -64,6 +64,9 @@ def energy_plan(*, now: datetime, target: datetime, pv_w: float | None, load_w: 
     surplus_w = max(0.0, pv - load)
     hours = max(0.0, (target - now).total_seconds() / 3600)
     forecast_kwh, forecast_complete = integrate_forecast_kwh(forecast_curve or [], now, target)
+    if forecast_kwh is None and _num(forecast_remaining_kwh) is not None:
+        forecast_kwh = max(0.0, float(forecast_remaining_kwh))
+        forecast_complete = True
 
     needed_kwh = None
     if soc is not None and capacity is not None and target_soc is not None:
