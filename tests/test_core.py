@@ -29,6 +29,12 @@ language = importlib.import_module("ester_core.language")
 migration = importlib.import_module("ester_core.migration")
 readiness = importlib.import_module("ester_core.readiness")
 house_controls = importlib.import_module("ester_core.house_controls")
+optimizer = importlib.import_module("ester_core.optimizer")
+kpi = importlib.import_module("ester_core.kpi")
+health = importlib.import_module("ester_core.health")
+snapshots = importlib.import_module("ester_core.snapshots")
+seasonal = importlib.import_module("ester_core.seasonal")
+scenario = importlib.import_module("ester_core.scenario")
 NOW = datetime(2026, 9, 29, 12, tzinfo=timezone.utc)
 
 
@@ -303,6 +309,106 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(inv["by_category"]["energy"], 1)
         result = readiness.migration_readiness(inv, [], {})
         self.assertFalse(result["energy"]["automatic_disable_allowed"])
+
+
+    def test_multi_objective_scoring_prioritizes_safety(self):
+        safety = {
+            "category": "operational_safety", "confidence": 0.95,
+            "risk": "high", "status": "shadow", "evidence": {}
+        }
+        lighting = {
+            "category": "lighting", "confidence": 0.95,
+            "risk": "low", "status": "shadow", "evidence": {}
+        }
+        a = optimizer.score_decision(safety, {})
+        b = optimizer.score_decision(lighting, {})
+        self.assertGreater(a["score"], b["score"])
+        tuned = optimizer.score_decision(lighting, {"objective_weight:energy": 1.0})
+        self.assertGreaterEqual(tuned["components"]["energy"], b["components"]["energy"])
+
+    def test_shadow_kpis_use_explicit_feedback_only(self):
+        decisions_data = [
+            {"category": "energy", "confidence": 0.8, "risk": "medium",
+             "status": "shadow", "outcome": {"type": "not_executed"}},
+            {"category": "climate", "confidence": 0.9, "risk": "low",
+             "status": "needs_input", "outcome": {"type": "observed_only"}},
+        ]
+        feedback = [
+            {"category": "energy", "rating": "correct"},
+            {"category": "climate", "rating": "partial"},
+        ]
+        result = kpi.shadow_kpis(decisions_data, feedback, [{"status": "open"}])
+        self.assertEqual(result["feedback"]["samples"], 2)
+        self.assertEqual(result["feedback"]["quality_score"], 0.75)
+        self.assertEqual(result["shadow_actuations"], 0)
+        self.assertEqual(result["open_questions"], 1)
+
+    def test_memory_snapshot_rollback_restores_configuration(self):
+        data = {
+            "preferences": {"comfort:room": 20},
+            "classifications": {},
+            "usage_profiles": [],
+            "knowledge": [],
+            "context_events": [],
+            "flexible_loads": [],
+            "memory_versions": [],
+        }
+        snap = snapshots.create_snapshot(data, NOW, "before", "test")
+        data["preferences"]["comfort:room"] = 24
+        snapshots.restore_snapshot(data, snap["snapshot_id"])
+        self.assertEqual(data["preferences"]["comfort:room"], 20)
+        self.assertEqual(len(data["memory_versions"]), 1)
+
+    def test_season_context_prefers_outside_temperature(self):
+        result = seasonal.season_context(NOW, 8, {})
+        self.assertEqual(result["season"], "winter")
+        self.assertEqual(result["source"], "outside_temperature")
+        result = seasonal.season_context(NOW, 29, {})
+        self.assertEqual(result["season"], "summer")
+
+    def test_autonomy_health_never_disables_shadow(self):
+        profiles = [
+            profile("solar_power", "2000", "W"),
+            profile("load_power", "1000", "W"),
+            profile("battery", "80", "%"),
+        ]
+        result = health.autonomy_health(
+            profiles,
+            {"thermal": {}, "ventilation": {}, "hot_water": {}, "occupancy": {}},
+            {"feedback": {"quality_score": 1.0}},
+            {"energy": {"status": "candidate_for_manual_migration"}},
+        )
+        self.assertFalse(result["overall_ready_for_executor"])
+        self.assertTrue(result["shadow_mode_required"])
+
+    def test_what_if_does_not_persist_changes(self):
+        profiles = [
+            profile("temperature", "18"),
+            profile("climate", "heat", domain="climate"),
+            profile("presence", "on", None, domain="binary_sensor"),
+        ]
+        data = {
+            "preferences": {"comfort:room": 20, "energy_price_eur_kwh": 0.3},
+            "context_events": [],
+            "usage_profiles": [],
+            "feedback": [],
+            "learning": {},
+            "thermal_models": {},
+            "flexible_loads": [],
+            "ventilation_models": {},
+            "hot_water_models": {},
+            "occupancy_models": {},
+            "energy_runtime": {},
+        }
+        before = data["preferences"].copy()
+        result = scenario.simulate_scenario(
+            engine=Engine(), profiles=profiles, data=data, now=NOW,
+            local_tz=timezone.utc, mode="vacation",
+            comfort_delta_c=2, energy_price_multiplier=2,
+        )
+        self.assertFalse(result["persisted"])
+        self.assertEqual(result["actuations"], 0)
+        self.assertEqual(data["preferences"], before)
 
 if __name__ == "__main__":
     unittest.main()
