@@ -47,7 +47,7 @@ class EsterBaseSensor(CoordinatorEntity[EsterCoordinator], SensorEntity):
             "name": "E.S.T.E.R.",
             "manufacturer": "Casa ES",
             "model": "Intelligent Home Manager",
-            "sw_version": "1.3.0",
+            "sw_version": "1.4.0",
         }
 
 
@@ -143,7 +143,7 @@ class EsterSummarySensor(EsterBaseSensor):
     """Compact UI summary, with full details available through get_summary."""
     _attr_name = "Summary"
     _attr_icon = "mdi:home-analytics"
-    _unrecorded_attributes = frozenset({"rooms", "contexts", "history", "usage", "thermal_models", "ventilation_models", "hot_water_models", "occupancy_models", "migration_readiness"})
+    _unrecorded_attributes = frozenset({"rooms", "contexts", "history", "usage", "thermal_models", "ventilation_models", "hot_water_models", "occupancy_models", "migration_readiness", "kpis", "autonomy_health", "anomalies", "last_replay", "last_scenario", "memory_versions"})
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry, "summary")
@@ -166,7 +166,14 @@ class EsterSummarySensor(EsterBaseSensor):
                 "hot_water_models": data.get("hot_water_models", {}),
                 "occupancy_models": data.get("occupancy_models", {}),
                 "calibration": data.get("calibration", {}),
-                "migration_readiness": data.get("migration_readiness", {})}
+                "migration_readiness": data.get("migration_readiness", {}),
+                "kpis": data.get("kpis", {}),
+                "autonomy_health": data.get("autonomy_health", {}),
+                "season": data.get("season", {}),
+                "anomalies": data.get("anomalies", []),
+                "last_replay": data.get("last_replay", {}),
+                "last_scenario": data.get("last_scenario", {}),
+                "memory_versions": data.get("memory_versions", [])}
 
 class EsterDataSuggestionsSensor(EsterBaseSensor):
     """Missing data and useful sensor types, without product endorsements."""
