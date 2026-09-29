@@ -11,12 +11,16 @@ STATIC_URL = "/ester_static"
 PANEL_ELEMENT = "ester-panel"
 
 
-async def async_setup_panel(hass) -> None:
-    """Register static frontend assets and the sidebar panel once."""
+async def async_setup_panel_assets(hass) -> None:
+    """Register static frontend assets once during integration setup."""
     frontend_dir = Path(__file__).parent / "frontend"
     await hass.http.async_register_static_paths(
         [StaticPathConfig(STATIC_URL, str(frontend_dir), False)]
     )
+
+
+def async_register_panel(hass) -> None:
+    """Register or refresh the E.S.T.E.R. sidebar panel."""
     frontend.async_register_built_in_panel(
         hass,
         component_name="custom",
