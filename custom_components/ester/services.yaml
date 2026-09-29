@@ -138,9 +138,18 @@ set_usage_profile:
         text: {}
     weekdays:
       name: "weekdays"
-      description: "0=lunedì ... 6=domenica"
+      description: "Giorni in cui vale la routine"
       selector:
-        object: {}
+        select:
+          multiple: true
+          options:
+            - {label: "Lunedì", value: "0"}
+            - {label: "Martedì", value: "1"}
+            - {label: "Mercoledì", value: "2"}
+            - {label: "Giovedì", value: "3"}
+            - {label: "Venerdì", value: "4"}
+            - {label: "Sabato", value: "5"}
+            - {label: "Domenica", value: "6"}
     start_time:
       name: "start_time"
       description: "HH:MM"
