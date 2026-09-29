@@ -1,7 +1,7 @@
 """Persistent question inbox and conservative answer interpretation."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 from uuid import uuid4
 
@@ -28,26 +28,43 @@ def question_from_decision(decision: dict, now: datetime) -> dict | None:
     }
 
 
+def _stable_key(item: dict) -> tuple:
+    return (item.get("category"), item.get("area_id"), item.get("title"), item.get("prompt"))
+
+
 def merge_questions(existing: list[dict], decisions: list[dict], now: datetime) -> tuple[list[dict], list[dict]]:
-    """Deduplicate open questions by decision/category/area/title."""
+    """Deduplicate questions and respect recently answered/dismissed items."""
     created = []
-    by_key = {
-        (q.get("decision_id"), q.get("category"), q.get("area_id"), q.get("title")): q
-        for q in existing if q.get("status") == "open"
-    }
+    latest = {}
+    for question in existing:
+        key = _stable_key(question)
+        updated = question.get("updated_at") or question.get("created_at")
+        try:
+            stamp = datetime.fromisoformat(updated) if updated else None
+        except ValueError:
+            stamp = None
+        current = latest.get(key)
+        if current is None or (stamp and stamp > current[0]):
+            latest[key] = (stamp or datetime.min.replace(tzinfo=now.tzinfo), question)
+
     for decision in decisions:
         item = question_from_decision(decision, now)
         if item is None:
             continue
-        key = (item["decision_id"], item["category"], item["area_id"], item["title"])
-        if key in by_key:
-            by_key[key]["updated_at"] = now.isoformat()
-            by_key[key]["confidence"] = item["confidence"]
-            continue
+        key = _stable_key(item)
+        previous = latest.get(key)
+        if previous:
+            stamp, question = previous
+            if question.get("status") == "open":
+                question["updated_at"] = now.isoformat()
+                question["confidence"] = item["confidence"]
+                question["decision_id"] = item["decision_id"]
+                continue
+            if now - stamp < timedelta(days=7):
+                continue
         existing.append(item)
         created.append(item)
-        by_key[key] = item
-    # Retain answered history, but keep storage bounded.
+        latest[key] = (now, item)
     return existing[-300:], created
 
 
