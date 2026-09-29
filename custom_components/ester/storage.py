@@ -32,6 +32,12 @@ class EsterStorage:
             "thermal_models": {},
             "calibration": {},
             "flexible_loads": [],
+            "ventilation_samples": {},
+            "ventilation_models": {},
+            "hot_water_samples": {},
+            "hot_water_models": {},
+            "occupancy_samples": {},
+            "occupancy_models": {},
         }
 
     async def async_load(self) -> None:
