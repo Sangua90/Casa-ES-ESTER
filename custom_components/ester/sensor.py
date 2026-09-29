@@ -143,7 +143,7 @@ class EsterSummarySensor(EsterBaseSensor):
     """Compact UI summary, with full details available through get_summary."""
     _attr_name = "Summary"
     _attr_icon = "mdi:home-analytics"
-    _unrecorded_attributes = frozenset({"rooms", "contexts", "history", "usage"})
+    _unrecorded_attributes = frozenset({"rooms", "contexts", "history", "usage", "thermal_models", "ventilation_models", "hot_water_models", "occupancy_models", "migration_readiness"})
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry, "summary")
@@ -162,7 +162,11 @@ class EsterSummarySensor(EsterBaseSensor):
                 "open_questions": len(data.get("questions", [])),
                 "usage_profiles": len(data.get("usage_profiles", [])),
                 "thermal_models": data.get("thermal_models", {}),
-                "calibration": data.get("calibration", {})}
+                "ventilation_models": data.get("ventilation_models", {}),
+                "hot_water_models": data.get("hot_water_models", {}),
+                "occupancy_models": data.get("occupancy_models", {}),
+                "calibration": data.get("calibration", {}),
+                "migration_readiness": data.get("migration_readiness", {})}
 
 class EsterDataSuggestionsSensor(EsterBaseSensor):
     """Missing data and useful sensor types, without product endorsements."""
