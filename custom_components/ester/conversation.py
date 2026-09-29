@@ -8,7 +8,7 @@ from homeassistant.const import MATCH_ALL
 from homeassistant.helpers import intent
 
 from .const import DOMAIN
-from .conversation import interpret_and_store
+from .language_pipeline import interpret_and_store
 
 PARALLEL_UPDATES = 0
 
