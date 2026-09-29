@@ -145,6 +145,11 @@ def merge_questions(existing: list[dict], decisions: list[dict], now: datetime) 
                 question["updated_at"] = now.isoformat()
                 question["confidence"] = item["confidence"]
                 question["decision_id"] = item["decision_id"]
+                for field in (
+                    "display_title", "display_prompt", "observed",
+                    "why_asking", "answer_hint", "quick_answers",
+                ):
+                    question[field] = item.get(field)
                 continue
             if now - stamp < timedelta(days=7):
                 continue
