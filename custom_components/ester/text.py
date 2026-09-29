@@ -7,6 +7,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .questions import apply_answer
+from .snapshots import create_snapshot
 from .language_pipeline import interpret_and_store
 
 
@@ -31,7 +32,7 @@ class EsterAnswerText(CoordinatorEntity, TextEntity):
             "name": "E.S.T.E.R.",
             "manufacturer": "Casa ES",
             "model": "Intelligent Home Manager",
-            "sw_version": "1.3.0",
+            "sw_version": "1.4.0",
         }
 
     def _question(self):
@@ -65,6 +66,12 @@ class EsterAnswerText(CoordinatorEntity, TextEntity):
             self.async_write_ha_state()
             return
         async with self.coordinator.storage.lock:
+            create_snapshot(
+                self.coordinator.storage.data,
+                dt_util.utcnow(),
+                "Prima di risposta domanda",
+                question["question_id"],
+            )
             apply_answer(
                 self.coordinator.storage.data,
                 question["question_id"],
@@ -96,7 +103,7 @@ class EsterTeachText(CoordinatorEntity, TextEntity):
             "name": "E.S.T.E.R.",
             "manufacturer": "Casa ES",
             "model": "Intelligent Home Manager",
-            "sw_version": "1.3.0",
+            "sw_version": "1.4.0",
         }
 
     @property
