@@ -22,6 +22,7 @@ from .models import RiskLevel, ImpactLevel
 from .questions import merge_questions
 from .thermal import build_room_thermal_model
 from .outcomes import evaluate_shadow_outcomes, calibration
+from .migration import legacy_automation_inventory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -146,4 +147,6 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 "learning_entities": len(learning), "data_suggestions": suggestions,
                 "thermal_models": data.get("thermal_models", {}),
                 "calibration": data.get("calibration", {}),
+                "automation_migration": legacy_automation_inventory(profiles),
+                "flexible_loads": data.get("flexible_loads", []),
                 "evaluated_at": now.isoformat()}
