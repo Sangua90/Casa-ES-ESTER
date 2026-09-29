@@ -17,6 +17,7 @@ models = importlib.import_module("ester_core.models")
 policies = importlib.import_module("ester_core.policies")
 Engine = importlib.import_module("ester_core.decision_engine").EsterDecisionEngine
 quality = importlib.import_module("ester_core.quality")
+usage = importlib.import_module("ester_core.usage")
 NOW = datetime(2026, 9, 29, 12, tzinfo=timezone.utc)
 
 
@@ -142,6 +143,34 @@ class CoreTests(unittest.TestCase):
                 if isinstance(node, ast.Call):
                     name = node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id if isinstance(node.func, ast.Name) else ""
                     self.assertNotIn(name, forbidden, f"{path}:{node.lineno}")
+
+
+    def test_expected_usage_current_upcoming_and_overnight(self):
+        profiles = [
+            {"profile_id": "weekend", "area_id": "room", "label": "Weekend",
+             "weekdays": [5, 6], "start_time": "18:00", "end_time": "23:30",
+             "expected_occupancy": 0.9},
+            {"profile_id": "night", "area_id": "bed", "label": "Night",
+             "weekdays": [0], "start_time": "22:00", "end_time": "02:00",
+             "expected_occupancy": 1.0},
+        ]
+        saturday = datetime(2026, 10, 3, 17, tzinfo=timezone.utc)
+        snap = usage.usage_snapshot(profiles, saturday, timezone.utc)
+        self.assertEqual(snap["room"]["upcoming"][0]["minutes_until"], 60)
+        monday_night = datetime(2026, 10, 5, 23, tzinfo=timezone.utc)
+        self.assertEqual(usage.usage_snapshot(profiles, monday_night, timezone.utc)["bed"]["expected_occupancy"], 1.0)
+        tuesday_after_midnight = datetime(2026, 10, 6, 1, tzinfo=timezone.utc)
+        self.assertEqual(usage.usage_snapshot(profiles, tuesday_after_midnight, timezone.utc)["bed"]["expected_occupancy"], 1.0)
+
+    def test_expected_use_can_create_preconditioning_shadow_proposal(self):
+        profiles = [profile("temperature", "17"), profile("climate", "heat", domain="climate")]
+        expected = {"room": {"current": [], "expected_occupancy": 0.0,
+                    "upcoming": [{"profile_id": "x", "label": "Gym", "minutes_until": 45,
+                                  "expected_occupancy": 0.9, "comfort_c": 20}]}}
+        result = policies.evaluate(Engine(), profiles, {}, [], {"comfort:room": 20}, [], NOW, expected)
+        proposal = next(d for d in result if d.title == "Uso stanza previsto")
+        self.assertEqual(proposal.proposed_action, "Valutare pre-climatizzazione")
+        self.assertEqual(proposal.outcome["type"], "not_executed")
 
 
 if __name__ == "__main__":
