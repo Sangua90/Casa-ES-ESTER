@@ -90,6 +90,23 @@ class EsterPanel extends HTMLElement {
     await this.call("ester", "rollback_memory", {snapshot_id:snapshotId});
   }
 
+  async exportMemory() {
+    if (!this._hass || this._busy) return;
+    this._busy = true;
+    this.render();
+    try {
+      const result = await this._hass.callWS({
+        type:"call_service", domain:"ester", service:"export_memory",
+        service_data:{}, return_response:true
+      });
+      const payload = result?.response || result;
+      this._memoryExport = JSON.stringify(payload, null, 2);
+    } finally {
+      this._busy = false;
+      this.render();
+    }
+  }
+
   async importMemory() {
     const memory_json = this.shadowRoot?.querySelector("#memory-import")?.value?.trim();
     if (!memory_json) return;
@@ -425,9 +442,11 @@ class EsterPanel extends HTMLElement {
           </article>`).join("") : '<div class="empty">Nessuno snapshot disponibile.</div>'}
       </section>
 
-      <h2 class="section-title">IMPORT MEMORIA</h2>
+      <h2 class="section-title">BACKUP / IMPORT MEMORIA</h2>
       <article class="control">
-        <textarea id="memory-import" placeholder='Incolla qui il JSON esportato da E.S.T.E.R.'></textarea>
+        <div class="button-row"><button id="memory-export">ESPORTA JSON</button></div>
+        <textarea readonly placeholder="Il backup JSON comparirà qui...">${this.esc(this._memoryExport || "")}</textarea>
+        <textarea id="memory-import" placeholder='Incolla qui un backup JSON E.S.T.E.R.'></textarea>
         <button id="memory-import-send">IMPORTA CON SNAPSHOT PREVENTIVO</button>
       </article>
     `;
@@ -448,6 +467,8 @@ class EsterPanel extends HTMLElement {
     if (classify) classify.onclick=()=>this.classify();
     const snapshot = this.shadowRoot?.querySelector("#snapshot-create");
     if (snapshot) snapshot.onclick=()=>this.snapshot();
+    const memoryExport = this.shadowRoot?.querySelector("#memory-export");
+    if (memoryExport) memoryExport.onclick=()=>this.exportMemory();
     const memoryImport = this.shadowRoot?.querySelector("#memory-import-send");
     if (memoryImport) memoryImport.onclick=()=>this.importMemory();
     const routineSave = this.shadowRoot?.querySelector("#routine-save");
