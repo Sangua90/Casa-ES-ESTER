@@ -21,10 +21,6 @@ async def async_setup_panel_assets(hass) -> None:
 
 def async_register_panel(hass) -> None:
     """Register or refresh the E.S.T.E.R. sidebar panel."""
-
-
-def async_register_panel(hass) -> None:
-    """Register or refresh the E.S.T.E.R. sidebar panel."""
     frontend.async_register_built_in_panel(
         hass,
         component_name="custom",
@@ -39,7 +35,7 @@ def async_register_panel(hass) -> None:
                 "js_url": f"{STATIC_URL}/ester-panel.js",
             }
         },
-        require_admin=False,
+        require_admin=True,
         update=True,
     )
 
