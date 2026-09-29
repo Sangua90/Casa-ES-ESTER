@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Any
+from asyncio import Lock
+from copy import deepcopy
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
@@ -14,6 +16,7 @@ class EsterStorage:
     """Small persistent store for learned context and shadow decisions."""
 
     def __init__(self, hass: HomeAssistant) -> None:
+        self.lock = Lock()
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self.data: dict[str, Any] = {
             "decisions": [],
@@ -30,7 +33,7 @@ class EsterStorage:
             self.data.update(saved)
 
     async def async_save(self) -> None:
-        await self._store.async_save(self.data)
+        await self._store.async_save(deepcopy(self.data))
 
     async def add_decision(self, decision: dict[str, Any]) -> None:
         decisions = self.data.setdefault("decisions", [])
@@ -41,10 +44,12 @@ class EsterStorage:
 
     async def add_feedback(self, feedback: dict[str, Any]) -> None:
         self.data.setdefault("feedback", []).append(feedback)
+        del self.data["feedback"][:-500]
         await self.async_save()
 
     async def add_context_event(self, event: dict[str, Any]) -> None:
         self.data.setdefault("context_events", []).append(event)
+        del self.data["context_events"][:-100]
         await self.async_save()
 
     async def set_preference(self, key: str, value: Any) -> None:

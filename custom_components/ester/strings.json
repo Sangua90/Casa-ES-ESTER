@@ -4,11 +4,27 @@
     "step": {
       "user": {
         "title": "E.S.T.E.R.",
-        "description": "Everything Seems Totally Easy, Right?\n\nVersion 0.1 runs only in Shadow Mode. It observes and reasons, but never controls real devices."
+        "description": "V1 Shadow Mode: osserva e propone, senza comandare dispositivi. Elaborazione locale; AI disabilitata per impostazione predefinita."
       }
     },
     "abort": {
-      "already_configured": "E.S.T.E.R. is already configured."
+      "already_configured": "E.S.T.E.R. è già configurata."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "AI opzionale",
+        "description": "Disabilitata: nessun dato lascia Home Assistant. Gemini: solo su richiesta esplicita Spiega decisione, invia a Google categoria, motivazione e misure presenti nella motivazione. Nessun controllo dispositivi. Inserisci un modello disponibile nel tuo account e la chiave API; sono conservati nelle opzioni HA. Per modificare Gemini reinserisci entrambi.",
+        "data": {
+          "ai_provider": "Provider",
+          "api_key": "Chiave API Gemini",
+          "model": "Nome modello Gemini"
+        }
+      }
+    },
+    "error": {
+      "invalid_ai": "Inserisci chiave API e nome modello validi."
     }
   }
 }

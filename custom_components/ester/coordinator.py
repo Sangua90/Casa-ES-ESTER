@@ -1,56 +1,96 @@
-"""Coordinator for E.S.T.E.R."""
-
+"""Observe, learn and journal proposals without a device service boundary."""
 from __future__ import annotations
 
 from datetime import timedelta
+import hashlib
+import json
 import logging
+from zoneinfo import ZoneInfo
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
-from .const import DEFAULT_EVALUATION_INTERVAL_MINUTES, DOMAIN, EVENT_DECISION
+from .const import DOMAIN, EVENT_DECISION, EVENT_QUESTION, MAX_DECISIONS
 from .decision_engine import EsterDecisionEngine
 from .discovery import discover_entities, summarize_inventory
-from .storage import EsterStorage
+from .history import HistoryReader, sample_value
+from .home import active_contexts, home_model, learn, occupancy_learning
+from .policies import evaluate
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class EsterCoordinator(DataUpdateCoordinator[dict]):
-    """Refresh the home model and execute shadow evaluations."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        entry: ConfigEntry,
-        storage: EsterStorage,
-    ) -> None:
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(minutes=DEFAULT_EVALUATION_INTERVAL_MINUTES),
-        )
-        self.entry = entry
-        self.storage = storage
+    def __init__(self, hass, entry, storage):
+        super().__init__(hass, _LOGGER, name=DOMAIN, config_entry=entry,
+                         update_interval=timedelta(minutes=5))
+        self.entry, self.storage = entry, storage
         self.engine = EsterDecisionEngine(hass)
+        self.history = HistoryReader(hass)
 
-    async def _async_update_data(self) -> dict:
-        profiles = discover_entities(self.hass)
-        summary = summarize_inventory(profiles)
-        summary["unassigned_entities"] = sum(1 for p in profiles if not p.area_id)
-        summary["shadow_mode"] = True
-
-        decisions = await self.engine.evaluate_snapshot(summary)
-        for decision in decisions:
-            payload = decision.as_dict()
-            await self.storage.add_decision(payload)
+    async def _async_update_data(self):
+        now = dt_util.utcnow()
+        profiles = discover_entities(self.hass, self.storage.data["classifications"])
+        history = await self.history.read(profiles, now)
+        events = []
+        async with self.storage.lock:
+            data = self.storage.data
+            live = data.setdefault("samples", {})
+            learning = {}
+            selected = {p.entity_id for p in profiles[:500]}
+            for removed in set(live) - selected:
+                del live[removed]
+            for p in profiles[:500]:
+                points = live.setdefault(p.entity_id, [])
+                points.append({"t": now.timestamp(), "v": sample_value(p)})
+                live[p.entity_id] = points = [s for s in points if now.timestamp() - s["t"] <= 86400][-300:]
+                samples = history["samples"].get(p.entity_id, []) + points
+                learning[p.entity_id] = learn(samples, now)
+                if p.role == "presence":
+                    learning[p.entity_id].update(occupancy_learning(samples, now, ZoneInfo(self.hass.config.time_zone)))
+                stats = history["statistics"].get(p.entity_id, [])
+                if stats:
+                    learning[p.entity_id]["statistics"] = {"buckets": len(stats), "latest": stats[-1], "source": "recorder_hourly"}
+            data["learning"] = learning
+            contexts = active_contexts(data["context_events"], now)
+            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now)
+            journal = data["decisions"]
+            states = {p.entity_id: p.state for p in profiles}
+            for previous in journal:
+                if (previous.get("outcome") or {}).get("type") == "not_executed":
+                    created = dt_util.parse_datetime(previous["created_at"])
+                    if created and now - created >= timedelta(minutes=30):
+                        previous["outcome"] = {"type": "observed_only", "observed_at": now.isoformat(),
+                            "states": {i: states.get(i) for i in previous["entity_ids"]},
+                            "causal_effect": "not_measurable_in_shadow_mode"}
+            latest = []
+            for proposal in proposals:
+                payload = proposal.as_dict()
+                key = hashlib.sha256(json.dumps([payload["category"], payload["title"], sorted(payload["entity_ids"]),
+                                                payload["proposed_action"], payload["evidence"].get("modes")]).encode()).hexdigest()[:24]
+                previous = next((d for d in reversed(journal) if d.get("key") == key), None)
+                if previous and now - dt_util.parse_datetime(previous["created_at"]) < timedelta(hours=6):
+                    current = {**payload, "decision_id": previous["decision_id"], "created_at": previous["created_at"],
+                               "key": key, "last_seen": now.isoformat(), "outcome": previous.get("outcome"),
+                               "feedback": previous.get("feedback")}
+                    previous["last_seen"] = now.isoformat()
+                    latest.append(current)
+                    continue
+                payload["key"] = key
+                journal.append(payload)
+                latest.append(payload)
+                events.append(payload)
+            del journal[:-MAX_DECISIONS]
+            await self.storage.async_save()
+        for payload in events:
             self.hass.bus.async_fire(EVENT_DECISION, payload)
+            if payload["status"] == "needs_input":
+                self.hass.bus.async_fire(EVENT_QUESTION, payload)
+        inventory = summarize_inventory(profiles)
+        inventory.update(unassigned_entities=sum(not p.area_id for p in profiles), shadow_mode=True)
+        return {"inventory": inventory, "rooms": home_model(profiles, learning),
+                "profiles": {p.entity_id: p.as_dict() for p in profiles}, "latest_decisions": latest,
+                "decision_count": len(journal), "contexts": contexts,
+                "history": {k: v for k, v in history.items() if k not in {"samples", "statistics"}},
+                "learning_entities": len(learning), "evaluated_at": now.isoformat()}
 
-        return {
-            "inventory": summary,
-            "profiles": {p.entity_id: p.as_dict() for p in profiles},
-            "latest_decisions": [d.as_dict() for d in decisions],
-            "decision_count": len(self.storage.data.get("decisions", [])),
-        }

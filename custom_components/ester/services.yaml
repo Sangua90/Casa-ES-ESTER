@@ -1,45 +1,119 @@
 add_context:
-  name: Add context
-  description: Add a temporary or contextual fact for E.S.T.E.R. without controlling any device.
+  name: "Aggiungi contesto"
+  description: "Contesto temporaneo interno; scadenza predefinita 24 ore."
   fields:
     label:
-      name: Label
-      required: true
-      example: "Ester is home sick today"
+      name: "label"
+      description: "Nome del contesto"
       selector:
-        text:
+        text: {}
+    mode:
+      name: "mode"
+      description: "normal, vacation, guests, illness o work_from_home"
+      selector:
+        text: {}
     starts_at:
-      name: Starts at
+      name: "starts_at"
+      description: "Inizio ISO 8601 con fuso orario"
       selector:
-        text:
+        text: {}
     ends_at:
-      name: Ends at
+      name: "ends_at"
+      description: "Fine ISO 8601 con fuso orario"
       selector:
-        text:
+        text: {}
+    areas:
+      name: "areas"
+      description: "ID aree; vuoto significa tutta la casa"
+      selector:
+        text: {}
     notes:
-      name: Notes
+      name: "notes"
+      description: "Note locali (non inviate a Gemini)"
       selector:
-        text:
-
+        text: {}
+remove_context:
+  name: "Rimuovi contesto"
+  description: "Rimuove un contesto usando il suo ID."
+  fields:
+    event_id:
+      name: "event_id"
+      description: "ID del contesto"
+      selector:
+        text: {}
 add_feedback:
-  name: Add decision feedback
-  description: Tell E.S.T.E.R. whether a shadow decision was correct.
+  name: "Feedback decisione"
+  description: "Registra o aggiorna una valutazione; non esegue la proposta."
   fields:
     decision_id:
-      name: Decision ID
-      required: true
+      name: "decision_id"
+      description: "ID decisione"
       selector:
-        text:
+        text: {}
     rating:
-      name: Rating
-      required: true
+      name: "rating"
+      description: "correct, wrong o partial"
       selector:
-        select:
-          options:
-            - correct
-            - wrong
-            - partial
+        text: {}
     comment:
-      name: Comment
+      name: "comment"
+      description: "Commento"
       selector:
-        text:
+        text: {}
+classify_entity:
+  name: "Classifica entità"
+  description: "Corregge il modello E.S.T.E.R. senza cambiare il registro HA."
+  fields:
+    entity_id:
+      name: "entity_id"
+      description: "Entità da classificare"
+      selector:
+        text: {}
+    role:
+      name: "role"
+      description: "Ruolo del sensore o dispositivo"
+      selector:
+        text: {}
+    area_id:
+      name: "area_id"
+      description: "ID area Home Assistant"
+      selector:
+        text: {}
+set_preference:
+  name: "Preferenza"
+  description: "Imposta comfort:<area> in °C o soil_min:<area> in percentuale."
+  fields:
+    key:
+      name: "key"
+      description: "Chiave preferenza"
+      selector:
+        text: {}
+    value:
+      name: "value"
+      description: "Valore numerico"
+      selector:
+        number:
+          mode: box
+evaluate:
+  name: "Valuta adesso"
+  description: "Aggiorna osservazioni e proposte Shadow."
+get_summary:
+  name: "Riepilogo"
+  description: "Restituisce stanze, contesti e registro decisioni (risposta obbligatoria)."
+  fields:
+    limit:
+      name: "limit"
+      description: "Numero decisioni da restituire, da 1 a 100"
+      selector:
+        number:
+          mode: box
+explain_decision:
+  name: "Spiega decisione"
+  description: "Spiegazione locale; con AI abilitata invia solo un riepilogo a Gemini."
+  fields:
+    decision_id:
+      name: "decision_id"
+      description: "ID decisione"
+      selector:
+        text: {}
+

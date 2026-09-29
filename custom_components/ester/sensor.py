@@ -20,13 +20,14 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up E.S.T.E.R. sensors."""
-    coordinator: EsterCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator: EsterCoordinator = entry.runtime_data
     async_add_entities(
         [
             EsterStatusSensor(coordinator, entry),
             EsterEntityCountSensor(coordinator, entry),
             EsterDecisionCountSensor(coordinator, entry),
             EsterQuestionsSensor(coordinator, entry),
+            EsterSummarySensor(coordinator, entry),
         ]
     )
 
@@ -45,7 +46,7 @@ class EsterBaseSensor(CoordinatorEntity[EsterCoordinator], SensorEntity):
             "name": "E.S.T.E.R.",
             "manufacturer": "Casa ES",
             "model": "Intelligent Home Manager",
-            "sw_version": "0.1.0",
+            "sw_version": "1.0.0",
         }
 
 
@@ -137,3 +138,24 @@ class EsterQuestionsSensor(EsterBaseSensor):
         return {
             "items": [item for item in latest if item.get("status") == "needs_input"]
         }
+
+class EsterSummarySensor(EsterBaseSensor):
+    """Compact UI summary, with full details available through get_summary."""
+    _attr_name = "Summary"
+    _attr_icon = "mdi:home-analytics"
+    _unrecorded_attributes = frozenset({"rooms", "contexts", "history"})
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "summary")
+
+    @property
+    def native_value(self):
+        return len((self.coordinator.data or {}).get("rooms", {}))
+
+    @property
+    def extra_state_attributes(self):
+        data = self.coordinator.data or {}
+        return {"rooms": {key: {"name": r["name"], "entities": len(r["entities"])} for key, r in data.get("rooms", {}).items()},
+                "contexts": [{k: c.get(k) for k in ("event_id", "label", "mode", "ends_at")} for c in data.get("contexts", [])],
+                "history": data.get("history", {}), "evaluated_at": data.get("evaluated_at"),
+                "learning_entities": data.get("learning_entities", 0)}

@@ -1,0 +1,34 @@
+title: E.S.T.E.R.
+views:
+  - title: Shadow
+    path: shadow
+    icon: mdi:brain
+    cards:
+      - type: markdown
+        content: >-
+          ## E.S.T.E.R. — Shadow Mode
+          Osservazioni e proposte: nessun comando ai dispositivi.
+          I nomi delle entità qui sotto vanno adattati agli ID della tua installazione.
+      - type: entities
+        entities:
+          - sensor.e_s_t_e_r_status
+          - sensor.e_s_t_e_r_observed_entities
+          - sensor.e_s_t_e_r_shadow_decisions
+          - sensor.e_s_t_e_r_questions
+          - sensor.e_s_t_e_r_summary
+      - type: markdown
+        title: Domande aperte
+        content: >-
+          {% for item in state_attr('sensor.e_s_t_e_r_questions', 'items') or [] %}
+          **{{ item.title }}** — {{ item.evidence.question or item.reasoning }}
+
+          {% endfor %}
+      - type: markdown
+        title: Ultime proposte
+        content: >-
+          {% for item in state_attr('sensor.e_s_t_e_r_shadow_decisions', 'latest') or [] %}
+          **{{ item.title }}** ({{ (item.confidence * 100) | round }}%, rischio {{ item.risk }})
+
+          {{ item.reasoning }}
+
+          {% endfor %}
