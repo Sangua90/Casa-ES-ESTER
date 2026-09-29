@@ -15,7 +15,7 @@
     "step": {
       "init": {
         "title": "AI opzionale",
-        "description": "Disabilitata: nessun dato lascia Home Assistant. Gemini: solo su richiesta esplicita Spiega decisione, invia a Google categoria, motivazione e misure presenti nella motivazione. Nessun controllo dispositivi. Inserisci un modello disponibile nel tuo account e la chiave API; sono conservati nelle opzioni HA. Per modificare Gemini reinserisci entrambi.",
+        "description": "Disabilitata: nessun dato lascia Home Assistant. Gemini: interpreta solo i messaggi che invii a E.S.T.E.R. quando il parser locale non è abbastanza sicuro e può spiegare decisioni su richiesta. Riceve un contesto ridotto, senza controllo dispositivi. Inserisci un modello disponibile nel tuo account e la chiave API; sono conservati nelle opzioni HA. Per modificare Gemini reinserisci entrambi.",
         "data": {
           "ai_provider": "Provider",
           "api_key": "Chiave API Gemini",
