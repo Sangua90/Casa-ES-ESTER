@@ -16,6 +16,7 @@ from homeassistant.util import dt as dt_util
 from .ai.factory import create_provider
 from .const import DOMAIN, EVENT_FEEDBACK
 from .home import MODES, ROLES
+from .usage import validate_profile
 
 TEXT = vol.All(cv.string, vol.Length(min=1, max=2000))
 SHORT = vol.All(cv.string, vol.Length(min=1, max=100))
@@ -97,6 +98,47 @@ def register_services(hass):
             await coordinator.storage.set_preference(key, value)
         await coordinator.async_request_refresh()
 
+    async def set_usage_profile(call):
+        coordinator = runtime()
+        from homeassistant.helpers import area_registry
+        area_id = call.data["area_id"]
+        if area_registry.async_get(hass).async_get_area(area_id) is None:
+            raise ServiceValidationError("Unknown area")
+        profile_id = call.data.get("profile_id") or str(uuid4())
+        profile = {
+            "profile_id": profile_id,
+            "area_id": area_id,
+            "label": call.data["label"],
+            "weekdays": list(call.data["weekdays"]),
+            "start_time": call.data["start_time"],
+            "end_time": call.data["end_time"],
+            "expected_occupancy": float(call.data["expected_occupancy"]),
+            "comfort_c": call.data.get("comfort_c"),
+            "notes": call.data.get("notes", ""),
+            "source": "user",
+        }
+        if not validate_profile(profile):
+            raise ServiceValidationError("Invalid usage profile")
+        if profile["comfort_c"] is not None and not 5 <= float(profile["comfort_c"]) <= 35:
+            raise ServiceValidationError("comfort_c must be 5–35 °C")
+        async with coordinator.storage.lock:
+            profiles = coordinator.storage.data.setdefault("usage_profiles", [])
+            coordinator.storage.data["usage_profiles"] = [p for p in profiles if p.get("profile_id") != profile_id]
+            coordinator.storage.data["usage_profiles"].append(profile)
+            await coordinator.storage.async_save()
+        await coordinator.async_request_refresh()
+        return {"profile_id": profile_id, "profile": profile}
+
+    async def remove_usage_profile(call):
+        coordinator = runtime()
+        async with coordinator.storage.lock:
+            profiles = coordinator.storage.data.setdefault("usage_profiles", [])
+            if not any(p.get("profile_id") == call.data["profile_id"] for p in profiles):
+                raise ServiceValidationError("Unknown usage profile")
+            coordinator.storage.data["usage_profiles"] = [p for p in profiles if p.get("profile_id") != call.data["profile_id"]]
+            await coordinator.storage.async_save()
+        await coordinator.async_request_refresh()
+
     async def evaluate_now(call):
         await runtime().async_request_refresh()
 
@@ -106,7 +148,8 @@ def register_services(hass):
         return {"shadow_mode": True, "real_actuation_enabled": False,
                 "inventory": data.get("inventory", {}), "rooms": data.get("rooms", {}),
                 "contexts": data.get("contexts", []), "history": data.get("history", {}),
-                "data_suggestions": data.get("data_suggestions", []),
+                "data_suggestions": data.get("data_suggestions", []), "usage": data.get("usage", {}),
+                "usage_profiles": coordinator.storage.data.get("usage_profiles", []),
                 "decisions": coordinator.storage.data["decisions"][-call.data.get("limit", 20):]}
 
     async def explain(call):
@@ -139,10 +182,22 @@ def register_services(hass):
         "classify_entity": (classify, {vol.Required("entity_id"): cv.entity_id,
             vol.Required("role"): vol.In(ROLES), vol.Optional("area_id"): SHORT}),
         "set_preference": (preference, {vol.Required("key"): SHORT, vol.Required("value"): vol.Coerce(float)}),
+        "set_usage_profile": (set_usage_profile, {
+            vol.Optional("profile_id"): SHORT,
+            vol.Required("area_id"): SHORT,
+            vol.Required("label"): SHORT,
+            vol.Required("weekdays"): [vol.All(vol.Coerce(int), vol.Range(min=0, max=6))],
+            vol.Required("start_time"): vol.Match(r"^(?:[01]\\d|2[0-3]):[0-5]\\d$"),
+            vol.Required("end_time"): vol.Match(r"^(?:[01]\\d|2[0-3]):[0-5]\\d$"),
+            vol.Required("expected_occupancy"): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+            vol.Optional("comfort_c"): vol.All(vol.Coerce(float), vol.Range(min=5, max=35)),
+            vol.Optional("notes"): TEXT,
+        }),
+        "remove_usage_profile": (remove_usage_profile, {vol.Required("profile_id"): SHORT}),
         "evaluate": (evaluate_now, {}),
         "get_summary": (summary, {vol.Optional("limit", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=100))}),
         "explain_decision": (explain, {vol.Required("decision_id"): SHORT}),
     }
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
-            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision"} else SupportsResponse.NONE)
+            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile"} else SupportsResponse.NONE)
