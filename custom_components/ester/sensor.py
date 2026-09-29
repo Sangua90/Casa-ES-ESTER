@@ -146,7 +146,7 @@ class EsterSummarySensor(EsterBaseSensor):
     """Compact UI summary, with full details available through get_summary."""
     _attr_name = "Summary"
     _attr_icon = "mdi:home-analytics"
-    _unrecorded_attributes = frozenset({"rooms", "contexts", "history"})
+    _unrecorded_attributes = frozenset({"rooms", "contexts", "history", "usage"})
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry, "summary")
