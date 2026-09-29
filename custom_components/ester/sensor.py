@@ -47,7 +47,7 @@ class EsterBaseSensor(CoordinatorEntity[EsterCoordinator], SensorEntity):
             "name": "E.S.T.E.R.",
             "manufacturer": "Casa ES",
             "model": "Intelligent Home Manager",
-            "sw_version": "1.2.0",
+            "sw_version": "1.3.0",
         }
 
 
@@ -160,7 +160,9 @@ class EsterSummarySensor(EsterBaseSensor):
                 "history": data.get("history", {}), "usage": data.get("usage", {}), "evaluated_at": data.get("evaluated_at"),
                 "learning_entities": data.get("learning_entities", 0),
                 "open_questions": len(data.get("questions", [])),
-                "usage_profiles": len(data.get("usage_profiles", []))}
+                "usage_profiles": len(data.get("usage_profiles", [])),
+                "thermal_models": data.get("thermal_models", {}),
+                "calibration": data.get("calibration", {})}
 
 class EsterDataSuggestionsSensor(EsterBaseSensor):
     """Missing data and useful sensor types, without product endorsements."""
