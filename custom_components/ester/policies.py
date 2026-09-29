@@ -8,11 +8,20 @@ from .models import ImpactLevel, RiskLevel
 from .thermal import compare_climate_strategies
 from .energy import energy_plan, rank_flexible_loads
 from .house_controls import lighting_plan, alarm_plan
+from .ventilation import ventilation_recommendation
+from .hot_water import hot_water_shadow_plan
+from .economics import heating_costs
+from .occupancy import predicted_occupancy
 
 
-def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None, thermal_models=None, flexible_loads=None, local_tz=None):
+def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None,
+             thermal_models=None, flexible_loads=None, local_tz=None, ventilation_models=None,
+             hot_water_models=None, occupancy_models=None):
     thermal_models = thermal_models or {}
     flexible_loads = flexible_loads or []
+    ventilation_models = ventilation_models or {}
+    hot_water_models = hot_water_models or {}
+    occupancy_models = occupancy_models or {}
     usage = usage or {}
     decisions = []
     rooms = sorted({p.area_id for p in profiles if p.area_id})
@@ -57,6 +66,10 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
         scope_modes = {c.get("mode", "normal") for c in contexts if not c.get("areas") or area in c["areas"]}
         expected = usage.get(area, {})
         expected_now = float(expected.get("expected_occupancy", 0) or 0)
+        local_now = now.astimezone(local_tz) if local_tz else now
+        learned_occ = predicted_occupancy(occupancy_models.get(area, {}), local_now)
+        if learned_occ is not None:
+            expected_now = max(expected_now, learned_occ)
         upcoming = expected.get("upcoming", [])
         presence = [p for p in local if p.role == "presence" and p.domain == "binary_sensor"]
         occupied = any(p.state == "on" for p in presence)
@@ -76,9 +89,23 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
             elif (occupied or expected_now >= 0.5) and "vacation" not in scope_modes:
                 t = sum(numeric_value(p) for p in temps) / len(temps)
                 if abs(t - target) >= 1:
-                    emit("climate", "Scostamento dal comfort", "Valutare riscaldamento" if t < target else "Valutare raffrescamento",
-                         f"Stanza occupata: {t:.1f} °C rispetto a {target:.1f} °C. Il trend descrive l'andamento, non una previsione causale.",
-                         temps + climates + presence, risk="medium", evidence={"target_c": target, "expected_use": expected})
+                    econ = heating_costs(
+                        electricity_eur_kwh=number(preferences.get("energy_price_eur_kwh")),
+                        gas_eur_m3=number(preferences.get("gas_price_eur_m3")),
+                        heat_pump_cop=number(preferences.get("heat_pump_cop")),
+                        boiler_efficiency=number(preferences.get("boiler_efficiency")),
+                    )
+                    if t < target and econ.get("preferred_source") == "heat_pump":
+                        action = "Valutare riscaldamento con PDC"
+                    elif t < target and econ.get("preferred_source") == "gas":
+                        action = "Valutare riscaldamento a gas"
+                    else:
+                        action = "Valutare riscaldamento" if t < target else "Valutare raffrescamento"
+                    emit("climate", "Scostamento dal comfort", action,
+                         f"Stanza occupata o prevista in uso: {t:.1f} °C rispetto a {target:.1f} °C.",
+                         temps + climates + presence, risk="medium",
+                         evidence={"target_c": target, "expected_use": expected,
+                                   "learned_occupancy": learned_occ, "heating_economics": econ})
             elif upcoming and "vacation" not in scope_modes:
                 next_use = upcoming[0]
                 t = sum(numeric_value(p) for p in temps) / len(temps)
@@ -117,12 +144,28 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
                      "La vacanza cambia il comfort richiesto, ma protezione antigelo e limiti tecnici restano da verificare.",
                      climates, risk="high", question="Quali limiti di mantenimento sono previsti dall'impianto?")
         humid = [p for p in local if p.role == "humidity" and numeric_value(p) is not None]
-        for p in humid:
-            if numeric_value(p) > 65:
-                emit("ventilation", "Umidità elevata", "Valutare ventilazione o deumidificazione",
-                     "Umidità relativa oltre 65%; senza umidità assoluta esterna non si può stabilire che aprire le finestre aiuti.",
-                     [p] + [x for x in local if x.role == "ventilation"], risk="medium",
-                     question="Sono disponibili condizioni esterne e limiti di rumore della stanza?")
+        vents = [x for x in local if x.role == "ventilation"]
+        if humid:
+            humidity_value = sum(numeric_value(p) for p in humid) / len(humid)
+            vent_model = ventilation_models.get(area, {})
+            vent_active = any(v.state == "on" for v in vents)
+            vr = ventilation_recommendation(
+                humidity=humidity_value,
+                model=vent_model,
+                active=vent_active,
+            )
+            if vr["strategy"] != "hold":
+                action = {
+                    "would_run": "Avrei mantenuto/avviato la ventilazione",
+                    "would_stop": "Avrei fermato la ventilazione",
+                }.get(vr["strategy"], "Continuare a osservare")
+                emit(
+                    "ventilation", "Ventilazione adattiva", action, vr["reason"],
+                    humid + vents, risk="medium",
+                    question=None if vent_model.get("confidence", 0) >= 0.6 else
+                    "Confermi che questa ventilazione serve a ridurre l'umidità di questa stanza?",
+                    evidence={"ventilation_model": vent_model, "ventilation_plan": vr},
+                )
         lights_all = [p for p in local if p.role == "lighting"]
         lux = [p for p in local if p.role == "illuminance" and numeric_value(p) is not None]
         if lights_all:
@@ -157,12 +200,41 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
 
     valid = [p for p in profiles if usable(p)]
     hot = [p for p in valid if p.role == "hot_water"]
+    pv_for_hot = [p for p in valid if p.role == "solar_power" and numeric_value(p) is not None]
+    load_for_hot = [p for p in valid if p.role == "load_power" and numeric_value(p) is not None]
+    pv_surplus_hot = None
+    if len(pv_for_hot) == len(load_for_hot) == 1:
+        pv_surplus_hot = max(0.0, numeric_value(pv_for_hot[0]) - numeric_value(load_for_hot[0]))
     for p in hot:
         temp = numeric_value(p)
         if temp is not None:
-            emit("hot_water", "Profilo ACS osservato", "Confrontare andamento ACS, richiesta e programma del produttore",
-                 f"Temperatura osservata {temp:.1f} °C. I cali possono indicare prelievo o dispersione; non sono diagnosi. Nessuna modifica ai cicli sanitari.",
-                 [p], risk="high", question="Quali programma sanitario, limiti del produttore e fasce d'uso ACS devono essere rispettati?")
+            target_hot = number(preferences.get("hot_water_target_c"))
+            model = hot_water_models.get(p.area_id or "unassigned", {})
+            if target_hot is None:
+                emit(
+                    "hot_water", "Target ACS da definire", "Raccogliere il target ACS",
+                    f"Temperatura osservata {temp:.1f} °C; il target non viene dedotto automaticamente.",
+                    [p], risk="high",
+                    question="Quale temperatura ACS normale vuoi usare come target, rispettando il programma sanitario del produttore?",
+                    evidence={"hot_water_model": model},
+                )
+            else:
+                hp = hot_water_shadow_plan(
+                    temp_c=temp,
+                    target_c=target_hot,
+                    expected_use_minutes=None,
+                    model=model,
+                    pv_surplus_w=pv_surplus_hot,
+                )
+                emit(
+                    "hot_water", "Piano ACS Shadow",
+                    hp["strategy"].replace("would_", "Avrei ").replace("_", " "),
+                    hp["reason"] + " I cicli sanitari del produttore restano fuori dall'ottimizzazione.",
+                    [p] + pv_for_hot + load_for_hot,
+                    risk="high",
+                    evidence={"hot_water_model": model, "hot_water_plan": hp,
+                              "target_c": target_hot, "pv_surplus_w": pv_surplus_hot},
+                )
     solar = [p for p in valid if p.role == "solar_power" and numeric_value(p) is not None]
     loads = [p for p in valid if p.role == "load_power" and numeric_value(p) is not None]
     grids = [p for p in valid if p.role == "grid_power" and numeric_value(p) is not None]
