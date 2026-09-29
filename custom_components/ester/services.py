@@ -208,6 +208,20 @@ def register_services(hass):
         await coordinator.async_request_refresh()
         return {"question_id": question_id, "status": "answered", "interpretation": interpretation}
 
+    async def select_voice_question(call):
+        coordinator = runtime()
+        question_id = call.data["question_id"]
+        question = next(
+            (q for q in coordinator.storage.data.setdefault("questions", [])
+             if q.get("question_id") == question_id and q.get("status") == "open"),
+            None,
+        )
+        if question is None:
+            raise ServiceValidationError("Unknown or closed question")
+        async with coordinator.storage.lock:
+            coordinator.storage.data["voice_question_id"] = question_id
+            await coordinator.storage.async_save()
+
     async def dismiss_question(call):
         coordinator = runtime()
         async with coordinator.storage.lock:
@@ -438,6 +452,7 @@ def register_services(hass):
         }),
         "remove_usage_profile": (remove_usage_profile, {vol.Required("profile_id"): SHORT}),
         "answer_question": (answer_question, {vol.Required("question_id"): SHORT, vol.Required("answer"): TEXT}),
+        "select_voice_question": (select_voice_question, {vol.Required("question_id"): SHORT}),
         "dismiss_question": (dismiss_question, {vol.Required("question_id"): SHORT}),
         "interpret_message": (interpret_message, {vol.Required("message"): TEXT}),
         "export_memory": (export_memory, {}),
