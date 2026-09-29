@@ -8,7 +8,6 @@ from uuid import uuid4
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
@@ -37,20 +36,25 @@ _FEEDBACK_SCHEMA = vol.Schema(
 )
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up E.S.T.E.R. from a config entry."""
-    storage = EsterStorage(hass)
-    await storage.async_load()
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Register E.S.T.E.R. internal actions.
 
-    coordinator = EsterCoordinator(hass, entry, storage)
-    await coordinator.async_config_entry_first_refresh()
+    These actions only write E.S.T.E.R. context/feedback data. They never
+    control Home Assistant devices.
+    """
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "coordinator": coordinator,
-        "storage": storage,
-    }
+    def _runtime():
+        entries = hass.data.get(DOMAIN, {})
+        if not entries:
+            return None
+        return next(iter(entries.values()))
 
     async def handle_add_context(call: ServiceCall) -> None:
+        runtime = _runtime()
+        if runtime is None:
+            return
+        storage: EsterStorage = runtime["storage"]
+        coordinator: EsterCoordinator = runtime["coordinator"]
         now = datetime.now().astimezone()
         payload = {
             "event_id": str(uuid4()),
@@ -64,6 +68,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_request_refresh()
 
     async def handle_add_feedback(call: ServiceCall) -> None:
+        runtime = _runtime()
+        if runtime is None:
+            return
+        storage: EsterStorage = runtime["storage"]
+        coordinator: EsterCoordinator = runtime["coordinator"]
         payload = {
             "feedback_id": str(uuid4()),
             "decision_id": call.data["decision_id"],
@@ -75,21 +84,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.bus.async_fire(EVENT_FEEDBACK, payload)
         await coordinator.async_request_refresh()
 
-    if not hass.services.has_service(DOMAIN, SERVICE_ADD_CONTEXT):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_ADD_CONTEXT,
-            handle_add_context,
-            schema=_CONTEXT_SCHEMA,
-        )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_ADD_CONTEXT,
+        handle_add_context,
+        schema=_CONTEXT_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_ADD_FEEDBACK,
+        handle_add_feedback,
+        schema=_FEEDBACK_SCHEMA,
+    )
+    return True
 
-    if not hass.services.has_service(DOMAIN, SERVICE_ADD_FEEDBACK):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_ADD_FEEDBACK,
-            handle_add_feedback,
-            schema=_FEEDBACK_SCHEMA,
-        )
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up E.S.T.E.R. from a config entry."""
+    storage = EsterStorage(hass)
+    await storage.async_load()
+
+    coordinator = EsterCoordinator(hass, entry, storage)
+    await coordinator.async_config_entry_first_refresh()
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "coordinator": coordinator,
+        "storage": storage,
+    }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
