@@ -167,3 +167,17 @@ La V1.4 mantiene **Shadow Mode obbligatorio** ma aggiunge il livello di controll
 - wizard dei dati mancanti.
 
 Il sistema non contiene ancora alcun executor reale. La futura rimozione dello Shadow resta un passaggio separato.
+
+
+## Question Inbox e voce
+Le domande V1.4 non mostrano più soltanto il prompt tecnico interno. Ogni domanda espone:
+- cosa E.S.T.E.R. ha osservato;
+- quale informazione manca;
+- perché quell'informazione cambia la decisione;
+- un esempio di risposta;
+- risposte rapide quando ha senso.
+
+Il pannello offre dettatura direttamente nei campi tramite Speech Recognition quando disponibile. Nel Companion App, se la dettatura web non è disponibile, il pulsante microfono può aprire Assist nativo; la domanda selezionata viene collegata prima alla sessione vocale E.S.T.E.R. così la risposta viene applicata alla domanda corretta.
+
+## Design JARVIS
+Il centro di controllo V1.4 usa un linguaggio visivo più vicino alla strumentazione cinematografica JARVIS: core centrale circolare, reticoli, anelli concentrici, sweep radar, pannelli traslucidi tecnici, indicatori sottili e minor dipendenza dalle classiche card Home Assistant. Il design resta originale e non include asset Marvel.
