@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .ai.factory import create_provider
 from .language import apply_interpretation, local_interpret, validate_interpretation
+from homeassistant.util import dt as dt_util
 
 
 async def interpret_and_store(hass, coordinator, message: str) -> dict:
@@ -26,13 +27,15 @@ async def interpret_and_store(hass, coordinator, message: str) -> dict:
         if response.structured:
             parsed = validate_interpretation(response.structured)
             parsed["text"] = message
+            if parsed.get("area_id") and parsed["area_id"] not in area_ids:
+                parsed = {"intent": "knowledge_note", "confidence": 0.4, "text": message}
             provider_name = response.provider or "gemini"
 
     async with coordinator.storage.lock:
         result = apply_interpretation(
             coordinator.storage.data,
             parsed,
-            __import__("homeassistant.util.dt", fromlist=["utcnow"]).utcnow(),
+            dt_util.utcnow(),
         )
         await coordinator.storage.async_save()
 
