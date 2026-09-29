@@ -108,13 +108,21 @@ def register_services(hass):
             or key == "grid_limit_w" and 0 <= value <= 100000
             or key == "inverter_limit_w" and 0 <= value <= 100000
             or key == "phase_limit_w" and 0 <= value <= 50000
+            or key == "hot_water_target_c" and 35 <= value <= 70
+            or key == "heat_pump_cop" and 1 <= value <= 8
+            or key == "boiler_efficiency" and 0.5 <= value <= 1.1
+            or key.startswith("lux_on:") and 0 <= value <= 5000
+            or key == "night_start_hour" and 0 <= value <= 23
+            or key == "morning_hour" and 0 <= value <= 23
         )
         if not valid:
             raise ServiceValidationError(
                 "Supported: comfort:<area>, soil_min:<area>, energy_price_eur_kwh, "
                 "gas_price_eur_m3, battery_reserve_percent, climate_power_kw:<area>, "
                 "battery_capacity_kwh, battery_target_soc, battery_target_hour_local, "
-                "base_load_w, grid_limit_w, inverter_limit_w, phase_limit_w"
+                "base_load_w, grid_limit_w, inverter_limit_w, phase_limit_w, "
+                "hot_water_target_c, heat_pump_cop, boiler_efficiency, lux_on:<area>, "
+                "night_start_hour, morning_hour"
             )
         async with coordinator.storage.lock:
             await coordinator.storage.set_preference(key, value)
@@ -260,6 +268,14 @@ def register_services(hass):
                 "usage_profiles": coordinator.storage.data.get("usage_profiles", []),
                 "questions": coordinator.storage.data.get("questions", [])[-100:],
                 "knowledge": coordinator.storage.data.get("knowledge", [])[-100:],
+                "thermal_models": data.get("thermal_models", {}),
+                "ventilation_models": data.get("ventilation_models", {}),
+                "hot_water_models": data.get("hot_water_models", {}),
+                "occupancy_models": data.get("occupancy_models", {}),
+                "calibration": data.get("calibration", {}),
+                "automation_migration": data.get("automation_migration", {}),
+                "migration_readiness": data.get("migration_readiness", {}),
+                "flexible_loads": coordinator.storage.data.get("flexible_loads", []),
                 "decisions": coordinator.storage.data["decisions"][-call.data.get("limit", 20):]}
 
     async def explain(call):
