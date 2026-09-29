@@ -229,18 +229,7 @@ def register_services(hass):
 
     async def export_memory(call):
         coordinator = runtime()
-        data = coordinator.storage.data
-        return {
-            "version": 1,
-            "preferences": data.get("preferences", {}),
-            "classifications": data.get("classifications", {}),
-            "usage_profiles": data.get("usage_profiles", []),
-            "knowledge": data.get("knowledge", []),
-            "thermal_models": data.get("thermal_models", {}),
-            "calibration": data.get("calibration", {}),
-            "flexible_loads": data.get("flexible_loads", []),
-            "context_events": data.get("context_events", []),
-        }
+        return {"version": 1, **portable_memory(coordinator.storage.data)}
 
     async def set_flexible_load(call):
         coordinator = runtime()
