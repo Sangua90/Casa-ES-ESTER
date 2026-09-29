@@ -130,9 +130,9 @@ class CoreTests(unittest.TestCase):
         solar = profile("solar_power", "2", "kW")
         load = profile("load_power", "700", "W")
         result = decisions([solar, load])
-        self.assertEqual(next(d for d in result if d.category == "energy").evidence["surplus_w"], 1300)
+        self.assertEqual(next(d for d in result if d.category == "energy").evidence["energy_plan"]["instant_surplus_w"], 1300)
         duplicate = profile("solar_power", "2", "kW")
-        self.assertFalse(any("surplus_w" in d.evidence for d in decisions([solar, load, duplicate])))
+        self.assertFalse(any("energy_plan" in d.evidence for d in decisions([solar, load, duplicate])))
 
     def test_feedback_only_lowers_confidence(self):
         profiles = [profile("presence", "on", None, domain="binary_sensor")]
