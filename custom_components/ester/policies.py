@@ -5,7 +5,8 @@ from .home import number, numeric_value, timestamp
 from .models import ImpactLevel, RiskLevel
 
 
-def evaluate(engine, profiles, learning, contexts, preferences, feedback, now):
+def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None):
+    usage = usage or {}
     decisions = []
     rooms = sorted({p.area_id for p in profiles if p.area_id})
     modes = {c.get("mode", "normal") for c in contexts}
@@ -47,6 +48,9 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now):
     for area in rooms:
         local = [p for p in profiles if p.area_id == area and usable(p)]
         scope_modes = {c.get("mode", "normal") for c in contexts if not c.get("areas") or area in c["areas"]}
+        expected = usage.get(area, {})
+        expected_now = float(expected.get("expected_occupancy", 0) or 0)
+        upcoming = expected.get("upcoming", [])
         presence = [p for p in local if p.role == "presence" and p.domain == "binary_sensor"]
         occupied = any(p.state == "on" for p in presence)
         absent = bool(presence) and all(p.state == "off" for p in presence)
@@ -62,12 +66,20 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now):
                 emit("climate", "Comfort da definire", "Raccogliere la temperatura desiderata",
                      "La temperatura obiettivo non viene dedotta dal nome della stanza.", temps + climates,
                      question=f"Quale temperatura di comfort in °C desideri per {area}? Usa set_preference comfort:{area}.")
-            elif occupied and "vacation" not in scope_modes:
+            elif (occupied or expected_now >= 0.5) and "vacation" not in scope_modes:
                 t = sum(numeric_value(p) for p in temps) / len(temps)
                 if abs(t - target) >= 1:
                     emit("climate", "Scostamento dal comfort", "Valutare riscaldamento" if t < target else "Valutare raffrescamento",
                          f"Stanza occupata: {t:.1f} °C rispetto a {target:.1f} °C. Il trend descrive l'andamento, non una previsione causale.",
-                         temps + climates + presence, risk="medium", evidence={"target_c": target})
+                         temps + climates + presence, risk="medium", evidence={"target_c": target, "expected_use": expected})
+            elif upcoming and "vacation" not in scope_modes:
+                next_use = upcoming[0]
+                t = sum(numeric_value(p) for p in temps) / len(temps)
+                use_target = number(next_use.get("comfort_c")) or target
+                if use_target is not None and abs(t - use_target) >= 1 and next_use["minutes_until"] <= 90:
+                    emit("climate", "Uso stanza previsto", "Valutare pre-climatizzazione",
+                         f"Uso previsto tra {next_use['minutes_until']} minuti; temperatura {t:.1f} °C rispetto a {use_target:.1f} °C.",
+                         temps + climates + presence, risk="medium", evidence={"target_c": use_target, "expected_use": expected})
             elif "vacation" in scope_modes:
                 emit("climate", "Modalità vacanza", "Valutare un profilo di mantenimento da concordare",
                      "La vacanza cambia il comfort richiesto, ma protezione antigelo e limiti tecnici restano da verificare.",
