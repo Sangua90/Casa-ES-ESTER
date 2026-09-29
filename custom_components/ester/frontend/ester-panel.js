@@ -287,6 +287,37 @@ class EsterPanel extends HTMLElement {
     await this.call("ester","remove_flexible_load",{load_id});
   }
 
+  categoryLabel(category) {
+    const labels = {
+      energy:"ENERGIA", climate:"CLIMA", hot_water:"ACQUA CALDA", ventilation:"VENTILAZIONE",
+      lighting:"LUCI", security:"SICUREZZA", operational_safety:"SICUREZZA OPERATIVA",
+      presence:"PRESENZA", irrigation:"IRRIGAZIONE", model:"MODELLO", input:"ALTRO"
+    };
+    return labels[category] || String(category || "ALTRO").replaceAll("_"," ").toUpperCase();
+  }
+
+  groupedDecisionCards(items=null) {
+    let list = (items || this.realDecisions()).slice();
+    if (!items && this._decisionCategory !== "all") list = list.filter(x=>x.category===this._decisionCategory);
+    const groups = {};
+    for (const d of list) {
+      const key = d.category || "other";
+      (groups[key] ||= []).push(d);
+    }
+    const order = ["energy","climate","hot_water","ventilation","lighting","security","operational_safety","presence","irrigation","other"];
+    return order.filter(k=>groups[k]?.length).map(k=>`
+      <section class="domain-group">
+        <div class="domain-head">
+          <div>
+            <span>DOMINIO</span>
+            <h3>${this.esc(this.categoryLabel(k))}</h3>
+          </div>
+          <b>${groups[k].length}</b>
+        </div>
+        <div class="grid">${this.decisionCards(groups[k])}</div>
+      </section>`).join("") || '<div class="empty">Nessuna decisione Shadow disponibile.</div>';
+  }
+
   decisionCards(items=null) {
     let list = (items || this.realDecisions()).slice().reverse();
     if (!items && this._decisionCategory !== "all") list = list.filter(x=>x.category===this._decisionCategory);
@@ -316,9 +347,31 @@ class EsterPanel extends HTMLElement {
     }).join("");
   }
 
-  questionCards() {
-    const items = this.questions().slice(0, 20);
+  groupedQuestionCards() {
+    const items = this.questions().slice(0, 50);
     if (!items.length) return '<div class="empty">Nessuna domanda aperta. E.S.T.E.R. non ha bisogno di chiarimenti in questo momento.</div>';
+    const groups = {};
+    for (const q of items) {
+      const key = q.category || "other";
+      (groups[key] ||= []).push(q);
+    }
+    const order = ["energy","climate","hot_water","ventilation","lighting","security","operational_safety","presence","irrigation","other"];
+    return order.filter(k=>groups[k]?.length).map(k=>`
+      <section class="domain-group question-domain">
+        <div class="domain-head">
+          <div>
+            <span>DOMANDE</span>
+            <h3>${this.esc(this.categoryLabel(k))}</h3>
+          </div>
+          <b>${groups[k].length}</b>
+        </div>
+        <div class="question-stack">${this.questionCards(groups[k])}</div>
+      </section>`).join("");
+  }
+
+  questionCards(itemsArg=null) {
+    const items = (itemsArg || this.questions()).slice(0, 50);
+    if (!items.length) return '<div class="empty">Nessuna domanda aperta.</div>';
     return items.map((q,index) => {
       const title = q.display_title || q.title || "Mi serve un'informazione";
       const prompt = q.display_prompt || q.prompt || "";
@@ -709,17 +762,17 @@ class EsterPanel extends HTMLElement {
         <h2 class="section-title">FORECAST CASA</h2>
         ${this.forecastCard()}
         <h2 class="section-title">LIVE DECISION FEED</h2>
-        <section class="grid">${this.decisionCards(this.realDecisions().slice(-12))}</section>
+        ${this.groupedDecisionCards(this.realDecisions().slice(-12))}
       `;
     } else if (this._tab === "decisions") {
       const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety"];
-      body = '<h2 class="section-title">DECISIONI CHE E.S.T.E.R. AVREBBE PRESO</h2><article class="control decision-explainer"><p>Qui vedi solo decisioni reali simulate in Shadow: cosa avrebbe fatto E.S.T.E.R., con quale sicurezza, rischio e motivazione. Sensori mancanti e configurazioni sono separati.</p><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+x+'</option>').join("")+'</select></label></article><section class="grid">'+this.decisionCards()+'</section>';
+      body = '<h2 class="section-title">DECISIONI CHE E.S.T.E.R. AVREBBE PRESO</h2><article class="control decision-explainer"><p>Le decisioni sono raggruppate per tipo, così puoi leggere subito Energia, Clima, Sicurezza, Luci e gli altri domini separatamente.</p><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
     } else if (this._tab === "questions") {
-      body = '<h2 class="section-title">QUESTION INBOX · DIMMI QUELLO CHE MANCA</h2><section class="question-stack">'+this.questionCards()+'</section>';
+      body = '<h2 class="section-title">QUESTION INBOX · DIMMI QUELLO CHE MANCA</h2><article class="control"><p>Le domande sono raggruppate per argomento, così puoi rispondere prima a Energia, Clima, Sicurezza o agli altri gruppi senza mescolare tutto.</p></article>'+this.groupedQuestionCards();
     } else if (this._tab === "energy") {
       body = '<h2 class="section-title">ENERGY MANAGER INTEGRATO</h2>'+this.energyCard()+
-        '<h2 class="section-title">ULTIME DECISIONI ENERGIA</h2><section class="grid">'+
-        this.decisionCards(this.realDecisions().filter(x=>x.category==="energy"))+'</section>';
+        '<h2 class="section-title">ULTIME DECISIONI ENERGIA</h2>'+
+        this.groupedDecisionCards(this.realDecisions().filter(x=>x.category==="energy"));
     } else if (this._tab === "learning") {
       body = '<h2 class="section-title">MODELLI APPRESI</h2><section class="grid">'+this.learningCards()+'</section>';
     } else if (this._tab === "validation") {
