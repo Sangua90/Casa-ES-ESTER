@@ -1,13 +1,17 @@
 """Deterministic shadow proposals. No Home Assistant imports or execution path."""
 from __future__ import annotations
 
+from datetime import timedelta
+
 from .home import number, numeric_value, timestamp
 from .models import ImpactLevel, RiskLevel
 from .thermal import compare_climate_strategies
+from .energy import energy_plan, rank_flexible_loads
 
 
-def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None, thermal_models=None):
+def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None, thermal_models=None, flexible_loads=None, local_tz=None):
     thermal_models = thermal_models or {}
+    flexible_loads = flexible_loads or []
     usage = usage or {}
     decisions = []
     rooms = sorted({p.area_id for p in profiles if p.area_id})
@@ -139,17 +143,72 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
                  [p], risk="high", question="Quali programma sanitario, limiti del produttore e fasce d'uso ACS devono essere rispettati?")
     solar = [p for p in valid if p.role == "solar_power" and numeric_value(p) is not None]
     loads = [p for p in valid if p.role == "load_power" and numeric_value(p) is not None]
-    batteries = [p for p in valid if p.role == "battery" and p.attributes.get("classification_source") == "user" and numeric_value(p) is not None]
-    if len(solar) == len(loads) == 1:
-        surplus = numeric_value(solar[0]) - numeric_value(loads[0])
-        emit("energy", "Bilancio FV osservato", "Valutare lo spostamento di carichi flessibili" if surplus > 500 else "Continuare a osservare il bilancio",
-             "Differenza istantanea FV-consumo; non è una previsione di produzione né una misura dell'energia risparmiata.",
-             solar + loads + batteries, risk="medium", evidence={"surplus_w": round(surplus, 1)},
-             question="Sono confermati perimetro dei contatori, riserva batteria e carichi flessibili?")
-    elif any(p.role in {"energy", "solar_power", "load_power", "battery"} for p in valid):
-        emit("energy", "Contatori da associare", "Associare un contatore FV e un contatore consumo totale",
-             "Non sommo sensori con possibili sovrapposizioni e non confondo W, kWh e percentuali batteria.",
-             question="Quali entità rappresentano FV, consumo totale e accumulo? Usa classify_entity.")
+    grids = [p for p in valid if p.role == "grid_power" and numeric_value(p) is not None]
+    batteries = [p for p in valid if p.role == "battery" and numeric_value(p) is not None]
+    phases = [p for p in valid if p.role == "phase_power" and numeric_value(p) is not None]
+    forecast_energy = [p for p in valid if p.role == "pv_forecast_energy" and numeric_value(p) is not None]
+
+    energy_entities = solar + loads + grids + batteries + phases + forecast_energy
+    if len(solar) == 1 and len(loads) == 1:
+        local_now = now.astimezone(local_tz) if local_tz else now
+        target_hour = int(number(preferences.get("battery_target_hour_local")) or 16)
+        target = local_now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
+        if target <= local_now:
+            target += timedelta(days=1)
+        plan = energy_plan(
+            now=local_now,
+            target=target,
+            pv_w=numeric_value(solar[0]),
+            load_w=numeric_value(loads[0]),
+            grid_w=numeric_value(grids[0]) if len(grids) == 1 else None,
+            battery_soc=numeric_value(batteries[0]) if len(batteries) == 1 else None,
+            battery_capacity_kwh=number(preferences.get("battery_capacity_kwh")),
+            target_soc=number(preferences.get("battery_target_soc")),
+            reserve_soc=number(preferences.get("battery_reserve_percent")),
+            forecast_curve=[],
+            forecast_remaining_kwh=numeric_value(forecast_energy[0]) if len(forecast_energy) == 1 else None,
+            base_load_w=number(preferences.get("base_load_w")),
+            grid_limit_w=number(preferences.get("grid_limit_w")),
+            inverter_limit_w=number(preferences.get("inverter_limit_w")),
+            phase_w=[numeric_value(p) for p in phases],
+            phase_limit_w=number(preferences.get("phase_limit_w")),
+        )
+        ranked = rank_flexible_loads(flexible_loads, plan)
+        strategy_labels = {
+            "protect_electrical_limits": "Proteggere i limiti elettrici",
+            "preserve_battery": "Preservare la riserva batteria",
+            "battery_first": "Dare priorità alla batteria",
+            "use_flexible_surplus": "Valutare carichi flessibili sul surplus",
+            "balanced": "Mantenere strategia bilanciata",
+        }
+        action = strategy_labels.get(plan["strategy"], "Continuare a osservare")
+        reason = (
+            f"Planner locale: FV {plan['pv_w']:.0f} W, carico {plan['load_w']:.0f} W, "
+            f"surplus istantaneo {plan['instant_surplus_w']:.0f} W."
+        )
+        if plan.get("battery_soc") is not None:
+            reason += f" SOC {plan['battery_soc']:.0f}%."
+        if plan.get("forecast_margin_kwh") is not None:
+            reason += f" Margine energetico al target {plan['forecast_margin_kwh']:.2f} kWh."
+        emit(
+            "energy",
+            "Piano energetico casa",
+            action,
+            reason,
+            energy_entities,
+            risk="medium",
+            evidence={"energy_plan": plan, "flexible_load_ranking": ranked[:20]},
+        )
+    elif any(p.role in {"energy", "solar_power", "load_power", "grid_power", "battery_power", "phase_power", "battery"} for p in valid):
+        emit(
+            "energy",
+            "Contatori energetici da completare",
+            "Associare almeno FV e consumo totale; consigliati rete, SOC e fasi",
+            "E.S.T.E.R. non somma contatori ambigui e richiede ruoli espliciti per il planner energetico.",
+            energy_entities,
+            question="Quali entità rappresentano FV, consumo totale, rete, SOC batteria e singole fasi? Usa classify_entity.",
+        )
+
     for p in [p for p in valid if p.role == "soil_moisture" and numeric_value(p) is not None]:
         threshold = number(preferences.get(f"soil_min:{p.area_id}"))
         if threshold is None or numeric_value(p) < threshold:
