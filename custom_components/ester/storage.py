@@ -38,6 +38,7 @@ class EsterStorage:
             "hot_water_models": {},
             "occupancy_samples": {},
             "occupancy_models": {},
+            "energy_runtime": {},
         }
 
     async def async_load(self) -> None:
