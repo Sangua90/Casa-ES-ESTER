@@ -23,6 +23,7 @@ from .questions import merge_questions
 from .thermal import build_room_thermal_model
 from .outcomes import evaluate_shadow_outcomes, calibration
 from .migration import legacy_automation_inventory
+from .readiness import migration_readiness
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -148,5 +149,10 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 "thermal_models": data.get("thermal_models", {}),
                 "calibration": data.get("calibration", {}),
                 "automation_migration": legacy_automation_inventory(profiles),
+                "migration_readiness": migration_readiness(
+                    legacy_automation_inventory(profiles),
+                    journal,
+                    data.get("calibration", {}),
+                ),
                 "flexible_loads": data.get("flexible_loads", []),
                 "evaluated_at": now.isoformat()}
