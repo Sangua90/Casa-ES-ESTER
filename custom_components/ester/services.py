@@ -94,8 +94,19 @@ def register_services(hass):
     async def preference(call):
         coordinator = runtime()
         key, value = call.data["key"], call.data["value"]
-        if not (key.startswith("comfort:") and 5 <= value <= 35 or key.startswith("soil_min:") and 0 <= value <= 100):
-            raise ServiceValidationError("Supported keys: comfort:<area> (5–35 °C), soil_min:<area> (0–100 %)")
+        valid = (
+            key.startswith("comfort:") and 5 <= value <= 35
+            or key.startswith("soil_min:") and 0 <= value <= 100
+            or key == "energy_price_eur_kwh" and 0 <= value <= 5
+            or key == "gas_price_eur_m3" and 0 <= value <= 10
+            or key == "battery_reserve_percent" and 0 <= value <= 100
+            or key.startswith("climate_power_kw:") and 0 < value <= 30
+        )
+        if not valid:
+            raise ServiceValidationError(
+                "Supported: comfort:<area>, soil_min:<area>, energy_price_eur_kwh, "
+                "gas_price_eur_m3, battery_reserve_percent, climate_power_kw:<area>"
+            )
         async with coordinator.storage.lock:
             await coordinator.storage.set_preference(key, value)
         await coordinator.async_request_refresh()
