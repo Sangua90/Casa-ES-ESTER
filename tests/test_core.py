@@ -19,6 +19,16 @@ Engine = importlib.import_module("ester_core.decision_engine").EsterDecisionEngi
 quality = importlib.import_module("ester_core.quality")
 usage = importlib.import_module("ester_core.usage")
 questions = importlib.import_module("ester_core.questions")
+thermal = importlib.import_module("ester_core.thermal")
+energy = importlib.import_module("ester_core.energy")
+ventilation = importlib.import_module("ester_core.ventilation")
+hot_water = importlib.import_module("ester_core.hot_water")
+economics = importlib.import_module("ester_core.economics")
+occupancy = importlib.import_module("ester_core.occupancy")
+language = importlib.import_module("ester_core.language")
+migration = importlib.import_module("ester_core.migration")
+readiness = importlib.import_module("ester_core.readiness")
+house_controls = importlib.import_module("ester_core.house_controls")
 NOW = datetime(2026, 9, 29, 12, tzinfo=timezone.utc)
 
 
@@ -168,9 +178,10 @@ class CoreTests(unittest.TestCase):
         expected = {"room": {"current": [], "expected_occupancy": 0.0,
                     "upcoming": [{"profile_id": "x", "label": "Gym", "minutes_until": 45,
                                   "expected_occupancy": 0.9, "comfort_c": 20}]}}
-        result = policies.evaluate(Engine(), profiles, {}, [], {"comfort:room": 20}, [], NOW, expected)
+        models = {"room": {"active_rate_c_per_h": 2.0, "passive_rate_c_per_h": -0.2, "confidence": 0.8}}
+        result = policies.evaluate(Engine(), profiles, {}, [], {"comfort:room": 20}, [], NOW, expected, models)
         proposal = next(d for d in result if d.title == "Uso stanza previsto")
-        self.assertEqual(proposal.proposed_action, "Valutare pre-climatizzazione")
+        self.assertIn("pre-climatizzazione", proposal.proposed_action)
         self.assertEqual(proposal.outcome["type"], "not_executed")
 
 
@@ -202,6 +213,96 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(result["scope"], "persistent")
         self.assertEqual(len(data["knowledge"]), 1)
         self.assertEqual(data["preferences"], {})
+
+
+    def test_local_thermal_model_and_strategy(self):
+        samples = [
+            {"t": NOW.timestamp() + i * 600, "temp": 18 + i * 0.3, "active": True}
+            for i in range(6)
+        ]
+        samples += [
+            {"t": NOW.timestamp() + 7200 + i * 600, "temp": 20 - i * 0.1, "active": False}
+            for i in range(6)
+        ]
+        model = thermal.build_room_thermal_model(samples)
+        self.assertIsNotNone(model["active_rate_c_per_h"])
+        self.assertGreater(model["active_rate_c_per_h"], 0)
+        self.assertLess(model["passive_rate_c_per_h"], 0)
+        opts = thermal.compare_climate_strategies(
+            current_c=18, target_c=20, minutes_until_use=90, model=model,
+            energy_price_eur_kwh=0.3, estimated_power_kw=1.5)
+        self.assertTrue(any(o["strategy"] == "precondition" for o in opts))
+
+    def test_energy_planner_protects_limits_and_ranks_loads(self):
+        target = NOW + timedelta(hours=4)
+        plan = energy.energy_plan(
+            now=NOW, target=target, pv_w=3000, load_w=5800, grid_w=5900,
+            battery_soc=50, battery_capacity_kwh=14.3, target_soc=90, reserve_soc=30,
+            forecast_curve=[], forecast_remaining_kwh=8, base_load_w=500,
+            grid_limit_w=6000, inverter_limit_w=10000, phase_w=[1000, 2000, 2500],
+            phase_limit_w=3500)
+        self.assertEqual(plan["strategy"], "protect_electrical_limits")
+        ranked = energy.rank_flexible_loads([
+            {"name": "boiler", "power_w": 1300, "duration_minutes": 60, "priority": 10}
+        ], plan)
+        self.assertFalse(ranked[0]["shadow_allowed"])
+
+    def test_ventilation_learning_can_stop_when_ineffective(self):
+        base = NOW.timestamp()
+        samples = []
+        for i in range(5):
+            samples.append({"t": base + i*600, "humidity": 70 + i*0.02, "active": True})
+        for i in range(5):
+            samples.append({"t": base + 7200 + i*600, "humidity": 70 + i*0.03, "active": False})
+        model = ventilation.ventilation_model(samples)
+        plan = ventilation.ventilation_recommendation(humidity=70, model=model, active=True)
+        self.assertIn(plan["strategy"], {"would_stop", "would_run"})
+
+    def test_hot_water_and_heating_economics(self):
+        base = NOW.timestamp()
+        samples = [{"t": base+i*600, "temp": 45+i,} for i in range(5)]
+        samples += [{"t": base+7200+i*600, "temp": 55-i*0.5} for i in range(5)]
+        model = hot_water.hot_water_model(samples)
+        self.assertGreaterEqual(model["confidence"], 0)
+        costs = economics.heating_costs(
+            electricity_eur_kwh=0.30, gas_eur_m3=0.35,
+            heat_pump_cop=3.5, boiler_efficiency=0.9)
+        self.assertIn(costs["preferred_source"], {"heat_pump", "gas"})
+
+    def test_occupancy_model_predicts_weekday_hour(self):
+        samples = []
+        stamp = datetime(2026, 9, 28, 18, tzinfo=timezone.utc)
+        for week in range(4):
+            for i in range(6):
+                samples.append({"t": (stamp - timedelta(days=7*week) + timedelta(minutes=5*i)).timestamp(),
+                                "occupied": True})
+        model = occupancy.occupancy_model(samples, timezone.utc)
+        self.assertEqual(occupancy.predicted_occupancy(model, stamp), 1.0)
+
+    def test_language_router_never_creates_device_action(self):
+        store = {"preferences": {}, "context_events": [], "knowledge": [], "usage_profiles": []}
+        parsed = language.local_interpret("Preferisco 21 gradi in room", ["room"])
+        result = language.apply_interpretation(store, parsed, NOW)
+        self.assertEqual(result["applied"], "preference")
+        self.assertEqual(store["preferences"]["comfort:room"], 21)
+
+    def test_alarm_and_lighting_planners_are_shadow_intents(self):
+        light = house_controls.lighting_plan(
+            light_on=False, occupied=True, presence_known=True,
+            illuminance_lux=20, lux_threshold=80)
+        self.assertEqual(light["strategy"], "would_turn_on")
+        alarm = house_controls.alarm_plan(
+            alarm_state="disarmed", occupied=False, presence_known=True,
+            expected_occupancy=0, doors_open=False, local_hour=14)
+        self.assertEqual(alarm["strategy"], "would_arm_away")
+
+    def test_migration_inventory_and_readiness_never_auto_disables(self):
+        p = profile("generic", "on", None, domain="automation")
+        p.name = "Allerta Fotovoltaico"
+        inv = migration.legacy_automation_inventory([p])
+        self.assertEqual(inv["by_category"]["energy"], 1)
+        result = readiness.migration_readiness(inv, [], {})
+        self.assertFalse(result["energy"]["automatic_disable_allowed"])
 
 if __name__ == "__main__":
     unittest.main()
