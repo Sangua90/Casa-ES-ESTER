@@ -19,7 +19,7 @@ async def async_setup_entry(hass, entry):
     coordinator = EsterCoordinator(hass, entry, storage)
     entry.runtime_data = coordinator
     await coordinator.async_config_entry_first_refresh()
-    await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR, Platform.TEXT])
+    await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR, Platform.TEXT, Platform.CONVERSATION])
     entry.async_on_unload(entry.add_update_listener(_reload))
     return True
 
