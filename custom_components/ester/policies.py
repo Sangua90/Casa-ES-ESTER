@@ -240,7 +240,7 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
     grids = [p for p in valid if p.role == "grid_power" and numeric_value(p) is not None]
     batteries = [p for p in valid if p.role == "battery" and numeric_value(p) is not None]
     phases = [p for p in valid if p.role == "phase_power" and numeric_value(p) is not None]
-    forecast_energy = [p for p in valid if p.role == "pv_forecast_energy" and numeric_value(p) is not None]
+    forecast_energy = [p for p in valid if p.role == "pv_forecast_remaining_energy" and numeric_value(p) is not None]
 
     energy_entities = solar + loads + grids + batteries + phases + forecast_energy
     if len(solar) == 1 and len(loads) == 1:
