@@ -16,13 +16,15 @@ E.S.T.E.R. osserva Home Assistant, costruisce un modello delle stanze e registra
 ## Installazione e aggiornamento dalla v0.1
 Versione di riferimento: **Home Assistant Core 2026.9.4** (Linux, Python >=3.14.2). Non è necessario aggiornare Python separatamente in HA OS.
 
-1. Scarica il ramo `ester-v1-shadow` da questo repository finché la PR V1 non è unita a main.
-2. Copia la cartella `custom_components/ester` nella cartella `custom_components` di Home Assistant, sostituendo la precedente.
+1. Apri **HACS → E.S.T.E.R. → Aggiorna** e scegli la versione stabile più recente. Se il repository non è ancora presente, aggiungi `https://github.com/Sangua90/Casa-ES-ESTER` in **HACS → menu → Repository personalizzati**, tipo **Integrazione**, poi scarica E.S.T.E.R.
+2. HACS scarica e sostituisce automaticamente i file; non servono ZIP o copie manuali.
 3. Riavvia Home Assistant. Se E.S.T.E.R. era già configurata, conserva la configurazione: la memoria v0.1 resta leggibile.
 4. Per una nuova installazione: **Impostazioni → Dispositivi e servizi → Aggiungi integrazione → E.S.T.E.R.**
 5. Assegna le aree in HA, consulta le domande e correggi i ruoli dove necessario. Non tutte le installazioni possiedono i sensori necessari a tutti i motori.
 
 Non creare una seconda integrazione. Non inserire la chiave Gemini in YAML o nel repository.
+
+Le nuove versioni vengono pubblicate automaticamente da GitHub dopo i test su `main`, quando cambia la versione del manifest. HACS rileva le release e gestisce gli aggiornamenti. L'installazione dell'aggiornamento e il riavvio seguono le impostazioni della tua istanza: il repository non abilita aggiornamenti o riavvii automatici di Home Assistant.
 
 ## Primo utilizzo
 Gli esempi usano ID fittizi: sostituiscili con quelli della tua installazione. Esegui le azioni da **Strumenti per sviluppatori → Azioni**.
