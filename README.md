@@ -1,5 +1,5 @@
 # E.S.T.E.R.
-**Everything Seems Totally Easy, Right? — V1.3 Pre-Final Shadow**
+**Everything Seems Totally Easy, Right? — V1.4 Pre-Autonomy Shadow**
 
 E.S.T.E.R. osserva Home Assistant, costruisce un modello delle stanze e registra proposte spiegabili. **Non contiene un esecutore, non chiama servizi dei dispositivi e non può abilitare l'attuazione.**
 
@@ -146,3 +146,24 @@ Il centro di controllo include:
 - **MIGRAZIONE**: stato delle automazioni legacy e prontezza alla sostituzione manuale.
 
 Il pannello è amministrativo e non abilita attuazione reale.
+
+
+## V1.4 — validazione pre-autonomia
+La V1.4 mantiene **Shadow Mode obbligatorio** ma aggiunge il livello di controllo necessario prima di una futura esecuzione reale:
+
+- replay storico Recorder da 1 a 30 giorni;
+- planner multi-obiettivo con pesi configurabili per sicurezza, comfort, costo, energia, usura e confidence;
+- separazione tra priorità della decisione ed execution readiness;
+- confidence calibrata dai feedback reali per dominio;
+- errore osservabile delle previsioni quando misurabile, senza attribuire causalità in Shadow;
+- KPI Shadow e health gate per dominio;
+- rilevamento conservativo di sensori indisponibili/bloccati;
+- contesto stagionale automatico;
+- forecast locale della giornata;
+- simulazioni what-if senza persistenza;
+- storico decisioni filtrabile;
+- editor visuale di routine, carichi, classificazioni e pesi;
+- snapshot, rollback, export e import della memoria;
+- wizard dei dati mancanti.
+
+Il sistema non contiene ancora alcun executor reale. La futura rimozione dello Shadow resta un passaggio separato.
