@@ -18,6 +18,7 @@ from .const import DOMAIN, EVENT_FEEDBACK
 from .home import MODES, ROLES
 from .usage import validate_profile
 from .questions import apply_answer
+from .conversation import interpret_and_store
 
 TEXT = vol.All(cv.string, vol.Length(min=1, max=2000))
 SHORT = vol.All(cv.string, vol.Length(min=1, max=100))
@@ -169,6 +170,27 @@ def register_services(hass):
             await coordinator.storage.async_save()
         await coordinator.async_request_refresh()
 
+    async def interpret_message(call):
+        coordinator = runtime()
+        try:
+            return await interpret_and_store(hass, coordinator, call.data["message"])
+        except Exception:
+            raise HomeAssistantError("Natural-language interpretation failed; no memory was changed") from None
+
+    async def export_memory(call):
+        coordinator = runtime()
+        data = coordinator.storage.data
+        return {
+            "version": 1,
+            "preferences": data.get("preferences", {}),
+            "classifications": data.get("classifications", {}),
+            "usage_profiles": data.get("usage_profiles", []),
+            "knowledge": data.get("knowledge", []),
+            "thermal_models": data.get("thermal_models", {}),
+            "calibration": data.get("calibration", {}),
+            "context_events": data.get("context_events", []),
+        }
+
     async def evaluate_now(call):
         await runtime().async_request_refresh()
 
@@ -228,10 +250,12 @@ def register_services(hass):
         "remove_usage_profile": (remove_usage_profile, {vol.Required("profile_id"): SHORT}),
         "answer_question": (answer_question, {vol.Required("question_id"): SHORT, vol.Required("answer"): TEXT}),
         "dismiss_question": (dismiss_question, {vol.Required("question_id"): SHORT}),
+        "interpret_message": (interpret_message, {vol.Required("message"): TEXT}),
+        "export_memory": (export_memory, {}),
         "evaluate": (evaluate_now, {}),
         "get_summary": (summary, {vol.Optional("limit", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=100))}),
         "explain_decision": (explain, {vol.Required("decision_id"): SHORT}),
     }
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
-            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question"} else SupportsResponse.NONE)
+            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "export_memory"} else SupportsResponse.NONE)
