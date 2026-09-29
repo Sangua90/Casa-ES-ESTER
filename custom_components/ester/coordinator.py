@@ -21,7 +21,7 @@ from .quality import data_suggestions
 from .models import RiskLevel, ImpactLevel
 from .questions import merge_questions
 from .thermal import build_room_thermal_model
-from .outcomes import evaluate_shadow_outcomes, calibration
+from .outcomes import evaluate_shadow_outcomes, calibration, calibrated_confidence
 from .migration import legacy_automation_inventory
 from .readiness import migration_readiness
 from .ventilation import ventilation_model
@@ -174,6 +174,11 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             for proposal in proposals:
                 payload = proposal.as_dict()
                 payload["evidence"] = dict(payload.get("evidence") or {})
+                conf = calibrated_confidence(payload, data.get("calibration", {}))
+                payload["evidence"]["confidence_calibration"] = conf
+                payload["confidence"] = conf["calibrated"]
+                threshold = self.engine.risk_policy.threshold(RiskLevel(payload["risk"]))
+                payload["status"] = "shadow" if payload["confidence"] >= threshold else "needs_input"
                 payload["evidence"]["objective_score"] = score_decision(payload, data.get("preferences", {}))
                 key = hashlib.sha256(json.dumps([payload["category"], payload["area_id"], payload["title"], sorted(payload["entity_ids"]),
                                                 payload["proposed_action"], payload["evidence"].get("modes")]).encode()).hexdigest()[:24]
