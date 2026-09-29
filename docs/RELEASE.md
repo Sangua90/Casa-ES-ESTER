@@ -16,7 +16,8 @@ Versione pensata per portare il cervello di E.S.T.E.R. vicino alla futura modali
 - Inventario automazioni legacy e stato di prontezza alla migrazione per categoria.
 - Planner Shadow per luci e antifurto.
 - Export della memoria E.S.T.E.R.
-- Dashboard HUD estesa con ENERGY e MIGRATION.
+- Centro di controllo nativo nel menu laterale di Home Assistant, stile JARVIS, con CORE, DECISIONI, DOMANDE, ENERGIA, APPRENDIMENTO e MIGRAZIONE.
+- Gestione carichi energia con fase, priorità, SOC minimo, finestre orarie, tempi minimi ON/OFF, massimo avvii e non-interrompibilità.
 
 Le automazioni esistenti e Casa ES Energy Manager **non vengono modificati o disattivati**. La migrazione resta manuale e progressiva.
 
