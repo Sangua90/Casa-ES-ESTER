@@ -17,6 +17,14 @@ class EsterPanel extends HTMLElement {
   summary() { return this.state("sensor.e_s_t_e_r_summary")?.attributes || {}; }
   latest() { return this.state("sensor.e_s_t_e_r_shadow_decisions")?.attributes?.latest || []; }
   history() { return this.summary().decision_history || this.latest(); }
+  isTrueDecision(d) {
+    if (!d || d.category === "model") return false;
+    const title = String(d.title || "").toLowerCase();
+    const action = String(d.proposed_action || "").toLowerCase();
+    const technical = ["da completare","associare almeno","configurazione","dati mancanti","contatori energetici","raccolta dati"];
+    return !technical.some(x => title.includes(x) || action.includes(x));
+  }
+  realDecisions() { return this.history().filter(d => this.isTrueDecision(d)); }
   questions() { return this.state("sensor.e_s_t_e_r_questions")?.attributes?.items || []; }
   migration() { return this.summary().migration_readiness || {}; }
   prefs() { return this.summary().preferences || {}; }
@@ -234,28 +242,29 @@ class EsterPanel extends HTMLElement {
   }
 
   decisionCards(items=null) {
-    let list = (items || this.history()).slice().reverse();
+    let list = (items || this.realDecisions()).slice().reverse();
     if (!items && this._decisionCategory !== "all") list = list.filter(x=>x.category===this._decisionCategory);
     list = list.slice(0, 100);
-    if (!list.length) return '<div class="empty">Nessuna decisione Shadow disponibile.</div>';
+    if (!list.length) return '<div class="empty">Non ci sono ancora vere decisioni Shadow da mostrare. Le richieste di configurazione sono nella sezione DATI MANCANTI.</div>';
     return list.map(d => {
       const objective = d.evidence?.objective_score?.score;
+      const readiness = d.evidence?.objective_score?.execution_readiness;
       return `
-      <article class="decision">
+      <article class="decision true-decision">
         <div class="decision-head">
           <div>
-            <div class="eyebrow">${this.esc(d.category || "decision")}</div>
+            <div class="eyebrow">${this.esc((d.category || "decision").toUpperCase())} · SHADOW</div>
             <h3>${this.esc(d.title)}</h3>
           </div>
-          <div class="confidence">${this.pct(d.confidence)}</div>
+          <div class="confidence-block"><span>SICUREZZA</span><b>${this.pct(d.confidence)}</b></div>
         </div>
         <div class="meter"><span style="width:${Math.max(0, Math.min(100, Number(d.confidence || 0) * 100))}%"></span></div>
-        <p>${this.esc(d.reasoning)}</p>
-        <div class="proposal">${this.esc(d.proposed_action)}</div>
+        <div class="decision-section"><span>COSA AVREBBE FATTO</span><strong>${this.esc(d.proposed_action)}</strong></div>
+        <div class="decision-section"><span>PERCHÉ</span><p>${this.esc(d.reasoning)}</p></div>
         <div class="meta">
           <span>RISCHIO ${this.esc((d.risk || "—").toUpperCase())}</span>
-          <span>GLOBAL SCORE ${objective == null ? "—" : this.pct(objective)}</span>
-          <span>SHADOW</span>
+          <span>PRIORITÀ ${objective == null ? "—" : this.pct(objective)}</span>
+          <span>READINESS ${readiness == null ? "—" : this.pct(readiness)}</span>
         </div>
       </article>`;
     }).join("");
@@ -650,17 +659,17 @@ class EsterPanel extends HTMLElement {
         <h2 class="section-title">FORECAST CASA</h2>
         ${this.forecastCard()}
         <h2 class="section-title">LIVE DECISION FEED</h2>
-        <section class="grid">${this.decisionCards(this.latest())}</section>
+        <section class="grid">${this.decisionCards(this.realDecisions().slice(-12))}</section>
       `;
     } else if (this._tab === "decisions") {
-      const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety","model"];
-      body = '<h2 class="section-title">STORICO DECISIONI SHADOW</h2><article class="control"><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+x+'</option>').join("")+'</select></label></article><section class="grid">'+this.decisionCards()+'</section>';
+      const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety"];
+      body = '<h2 class="section-title">DECISIONI CHE E.S.T.E.R. AVREBBE PRESO</h2><article class="control decision-explainer"><p>Qui vedi solo decisioni reali simulate in Shadow: cosa avrebbe fatto E.S.T.E.R., con quale sicurezza, rischio e motivazione. Sensori mancanti e configurazioni sono separati.</p><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+x+'</option>').join("")+'</select></label></article><section class="grid">'+this.decisionCards()+'</section>';
     } else if (this._tab === "questions") {
       body = '<h2 class="section-title">QUESTION INBOX · DIMMI QUELLO CHE MANCA</h2><section class="question-stack">'+this.questionCards()+'</section>';
     } else if (this._tab === "energy") {
       body = '<h2 class="section-title">ENERGY MANAGER INTEGRATO</h2>'+this.energyCard()+
         '<h2 class="section-title">ULTIME DECISIONI ENERGIA</h2><section class="grid">'+
-        this.decisionCards(this.latest().filter(x=>x.category==="energy"))+'</section>';
+        this.decisionCards(this.realDecisions().filter(x=>x.category==="energy"))+'</section>';
     } else if (this._tab === "learning") {
       body = '<h2 class="section-title">MODELLI APPRESI</h2><section class="grid">'+this.learningCards()+'</section>';
     } else if (this._tab === "validation") {
@@ -693,7 +702,7 @@ class EsterPanel extends HTMLElement {
         .teach,.control,.health{border:1px solid #1eddfc40;background:#041219c8;border-radius:12px;padding:15px}.teach-row,.answer-row,.button-row{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
         textarea,input,select{width:100%;border:1px solid #25dffc44;background:#02090e;color:#dcfbff;border-radius:8px;padding:11px}.teach textarea,.control textarea{min-height:85px;resize:vertical}
         .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}.decision,.question,.migration,.model,.energy-core{position:relative;border:0;border-top:1px solid #63eaff42;border-bottom:1px solid #63eaff1f;background:linear-gradient(90deg,transparent,#05161dbd 7%,#05161dbd 93%,transparent);clip-path:polygon(0 10px,10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%);padding:18px 20px;box-shadow:none}.decision:before,.question:before,.migration:before,.model:before{content:"";position:absolute;left:14px;top:0;width:70px;height:1px;background:#74efff;box-shadow:0 0 8px #26e7ff}
-        .decision-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.decision h3,.question h3,.migration h3,.model h3{margin:5px 0 10px;color:#e9fdff}.confidence{font-family:monospace;font-size:25px;color:#68efff}.meter{height:3px;background:#0e2a34;margin:8px 0 14px}.meter span{display:block;height:100%;background:#53edff;box-shadow:0 0 10px #2ae8ff}.decision p,.question p,.energy-core p,.control p,.health p{color:#9dc5cf;line-height:1.5}.proposal{padding:10px 12px;background:#06222c;border-left:2px solid #50e9ff;color:#c8f8ff;margin-top:12px}.meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:#4fa3b3;font-family:monospace;font-size:10px;margin-top:13px}
+        .decision-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.confidence-block{text-align:right;font-family:monospace}.confidence-block span{display:block;font-size:8px;letter-spacing:.18em;color:#4eaabb}.confidence-block b{font-size:28px;font-weight:400;color:#c9fbff;text-shadow:0 0 12px #4eeaff55}.decision-section{margin:14px 0;padding-left:13px;border-left:1px solid #45e9ff55}.decision-section span{display:block;font-size:9px;letter-spacing:.17em;color:#4cb4c4;margin-bottom:5px}.decision-section strong{font-size:17px;font-weight:400;color:#dcfbff}.decision-section p{margin:0;color:#91c0c8;line-height:1.45}.decision-explainer{margin-bottom:14px}.decision h3,.question h3,.migration h3,.model h3{margin:5px 0 10px;color:#e9fdff}.confidence{font-family:monospace;font-size:25px;color:#68efff}.meter{height:3px;background:#0e2a34;margin:8px 0 14px}.meter span{display:block;height:100%;background:#53edff;box-shadow:0 0 10px #2ae8ff}.decision p,.question p,.energy-core p,.control p,.health p{color:#9dc5cf;line-height:1.5}.proposal{padding:10px 12px;background:#06222c;border-left:2px solid #50e9ff;color:#c8f8ff;margin-top:12px}.meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:#4fa3b3;font-family:monospace;font-size:10px;margin-top:13px}
         .answer-row input{flex:1;min-width:180px}.mic-btn{border-radius:999px;border-color:#69f2ff;box-shadow:0 0 14px #00d9ff44;background:radial-gradient(circle,#0b3444,#041018)}.big-mic{min-width:112px}.quick-row{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.quick{padding:7px 10px;font-size:11px}.question-focus{display:grid;grid-template-columns:120px 1fr;gap:18px;align-items:start}.question-radar{position:relative;width:108px;height:108px;border-radius:50%;border:1px solid #69efff99;display:grid;place-items:center;background:radial-gradient(circle,#0bdcff24 0,#031018 58%,transparent 59%);box-shadow:0 0 25px #00dcff22,inset 0 0 25px #00dcff18}.radar-ring{position:absolute;border:1px solid #43e8ff66;border-radius:50%}.rr1{inset:12%;border-style:dashed;animation:spin 9s linear infinite}.rr2{inset:28%;animation:spin 5s linear reverse infinite}.radar-value{font:700 20px monospace;color:#c9fbff;text-shadow:0 0 12px #56eaff}.question-block{margin:10px 0;padding:9px 12px;border-left:2px solid #28dff2;background:linear-gradient(90deg,#09202a88,transparent)}.question-block span{display:block;font-size:9px;letter-spacing:.18em;color:#49c6dc}.question-block p{margin:5px 0}.question-block.ask{border-left-color:#fff}.question-block.why{border-left-color:#6ff7d0}.hint{font-size:12px;color:#7db5c0;font-style:italic;margin:8px 0}.energy-core{display:flex;align-items:center;gap:35px}.orb{width:150px;height:150px;border-radius:50%;border:1px solid #4dedff;display:grid;place-items:center;box-shadow:0 0 30px #00d9ff45,inset 0 0 35px #00d9ff25;flex:0 0 auto}.orb-core{width:48px;height:48px;border-radius:50%;background:#c9fbff;box-shadow:0 0 50px #16e5ff}.energy-data{flex:1}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metrics.compact b{font-size:19px}.status{font-family:monospace;color:#6ff6cb}.model pre{white-space:pre-wrap;max-height:310px;overflow:auto;color:#7eb9c5;font-size:11px}.empty{padding:30px;color:#6c9da8;border:1px dashed #1bd5ef35;border-radius:10px}
         .health.ok{border-color:#5dffc16b}.health.warn{border-color:#ffc95d59}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:10px 0}.form-grid.one{grid-template-columns:1fr auto}.form-grid label{font-size:11px;color:#68c9da;letter-spacing:.08em}.form-grid label input,.form-grid label select{margin-top:5px}.timeline{display:grid;gap:7px;margin-top:12px}.timeline div{display:flex;justify-content:space-between;gap:15px;padding:9px;border-bottom:1px solid #1cdff322}.timeline span{color:#7bbcca;font-size:12px}
         @media(max-width:800px){.jarvis-stage{grid-template-columns:1fr;min-height:600px}.telemetry{position:absolute;width:47%;bottom:6px;padding:12px}.telemetry.left{left:0}.telemetry.right{right:0}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}.identity-strip{align-items:flex-start;flex-direction:column}.command-input{grid-template-columns:1fr}.question-panel{grid-template-columns:1fr;padding:20px}.question-index{display:none}.question-context{grid-template-columns:1fr}.answer-console{grid-template-columns:1fr}.question-main h2{font-size:22px}.question-prompt{font-size:18px}.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:310px;gap:18px;padding:18px;flex-direction:column}.jarvis{width:175px;height:175px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
