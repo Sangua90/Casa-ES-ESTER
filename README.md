@@ -1,5 +1,5 @@
 # E.S.T.E.R.
-**Everything Seems Totally Easy, Right? — V1 Shadow Mode**
+**Everything Seems Totally Easy, Right? — V1.2 Shadow Mode**
 
 E.S.T.E.R. osserva Home Assistant, costruisce un modello delle stanze e registra proposte spiegabili. **Non contiene un esecutore, non chiama servizi dei dispositivi e non può abilitare l'attuazione.**
 
@@ -10,7 +10,7 @@ E.S.T.E.R. osserva Home Assistant, costruisce un modello delle stanze e registra
 - Valuta clima, FV/consumi/batteria, ACS, ventilazione/deumidificazione, irrigazione, luci, presenza e segnali di sicurezza.
 - Registra confidence, rischio, impatto, motivazioni, evidenze, alternative e osservazioni successive. Le osservazioni successive **non** dimostrano l'effetto di una proposta mai eseguita.
 - Conserva preferenze, contesti a scadenza, profili persistenti d’uso previsto degli spazi e feedback. Supporta vacanza, ospiti, malattia e lavoro da casa.
-- Espone sei sensori, dieci servizi amministrativi e una dashboard di esempio.
+- Espone sensori diagnostici, un campo risposta interattivo, servizi amministrativi e una dashboard HUD.
 - Funziona localmente senza AI. Gemini è opzionale, sostituibile e usato solo quando richiedi una spiegazione.
 
 ## Installazione e aggiornamento dalla v0.1
@@ -80,6 +80,11 @@ data:
 ```
 Valutazioni: `correct`, `wrong`, `partial`. Un secondo feedback sulla stessa decisione sostituisce il precedente. Il feedback negativo riduce la confidence della categoria; non crea automaticamente nuove regole operative.
 
+## Domande e apprendimento
+Le decisioni con informazioni mancanti entrano nella **Question Inbox**. Il sensore Questions espone le domande aperte e l'entità `text.e_s_t_e_r_answer_current_question` permette di rispondere direttamente dalla dashboard alla domanda più vecchia.
+
+Una risposta chiara come “Preferisco 21 gradi” a una domanda di comfort diventa una preferenza strutturata. Una risposta più ambigua viene conservata come conoscenza con fonte utente, senza creare automaticamente una regola. Sono disponibili anche `ester.answer_question` e `ester.dismiss_question`.
+
 ## Dashboard e notifiche
 [Dashboard Lovelace di esempio](examples/dashboard.yaml): aggiungi una dashboard manuale e incolla il contenuto nell'editor YAML. Adatta gli ID ai sei sensori presenti nella pagina del dispositivo E.S.T.E.R.; i nomi possono dipendere dalla versione precedente e dalle personalizzazioni.
 
@@ -110,3 +115,7 @@ I test puri funzionano anche senza Home Assistant. I test d'integrazione richied
 
 ## Come migliorare E.S.T.E.R.
 Il nuovo box nella dashboard e il sensore Data suggestions mostrano dati mancanti per stanza, utilità, priorità e tipo di sensore utile. Prima suggeriscono di ripristinare sensori non disponibili o associare entità senza area; hardware nuovo è una possibilità solo dopo queste verifiche. Copre temperatura, umidità, presenza e umidità del terreno in base ai dispositivi osservati. Ogni suggerimento ha un decision_id per la spiegazione locale o Gemini opzionale. Nessun prodotto specifico o acquisto automatico.
+
+
+## E.S.T.E.R. HUD
+La V1.2 include `examples/dashboard.yaml` con tre viste: CORE, QUESTIONS e LEARNING, più `examples/ester_hud_theme.yaml` per il tema scuro/ciano. Il pulsante microfono usa l'azione Assist nativa di Home Assistant; il campo risposta testuale è interno a E.S.T.E.R. e non controlla dispositivi.
