@@ -28,6 +28,11 @@ from .ventilation import ventilation_model
 from .hot_water import hot_water_model
 from .occupancy import occupancy_model
 from .managed_energy import update_runtime
+from .optimizer import score_decision
+from .kpi import shadow_kpis
+from .health import autonomy_health
+from .seasonal import season_context
+from .anomaly import detect_anomalies
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -136,6 +141,16 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             usage = usage_snapshot(data.get("usage_profiles", []), now, ZoneInfo(self.hass.config.time_zone))
             proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage, data["thermal_models"], data.get("flexible_loads", []), ZoneInfo(self.hass.config.time_zone), data.get("ventilation_models", {}), data.get("hot_water_models", {}), data.get("occupancy_models", {}), data.get("energy_runtime", {}))
             suggestions = data_suggestions(profiles)
+            outside_values = [
+                sample_value(p) for p in profiles
+                if p.role == "temperature" and not p.area_id and sample_value(p) is not None
+            ]
+            season = season_context(
+                now.astimezone(local_tz),
+                outside_values[0] if outside_values else None,
+                data.get("preferences", {}),
+            )
+            anomalies = detect_anomalies(profiles, learning, now.timestamp())
             for suggestion in suggestions:
                 proposal = self.engine.build_decision(category="model", title=suggestion["title"],
                     proposed_action=suggestion["next_step"], reasoning=suggestion["benefit"],
@@ -157,6 +172,8 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             latest = []
             for proposal in proposals:
                 payload = proposal.as_dict()
+                payload["evidence"] = dict(payload.get("evidence") or {})
+                payload["evidence"]["objective_score"] = score_decision(payload, data.get("preferences", {}))
                 key = hashlib.sha256(json.dumps([payload["category"], payload["area_id"], payload["title"], sorted(payload["entity_ids"]),
                                                 payload["proposed_action"], payload["evidence"].get("modes")]).encode()).hexdigest()[:24]
                 previous = next((d for d in reversed(journal) if d.get("key") == key), None)
@@ -187,6 +204,23 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             suggestion["decision_id"] = next(d["decision_id"] for d in latest
                 if d["evidence"].get("data_suggestion", {}).get("key") == suggestion["key"])
         inventory.update(unassigned_entities=sum(not p.area_id for p in profiles), shadow_mode=True)
+        migration = migration_readiness(
+            legacy_automation_inventory(profiles),
+            journal,
+            data.get("calibration", {}),
+        )
+        kpis = shadow_kpis(journal, data.get("feedback", []), data.get("questions", []))
+        health = autonomy_health(
+            profiles,
+            {
+                "thermal": data.get("thermal_models", {}),
+                "ventilation": data.get("ventilation_models", {}),
+                "hot_water": data.get("hot_water_models", {}),
+                "occupancy": data.get("occupancy_models", {}),
+            },
+            kpis,
+            migration,
+        )
         return {"inventory": inventory, "rooms": home_model(profiles, learning),
                 "profiles": {p.entity_id: p.as_dict() for p in profiles}, "latest_decisions": latest,
                 "decision_count": len(journal), "contexts": contexts, "usage": usage,
@@ -200,10 +234,16 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 "hot_water_models": data.get("hot_water_models", {}),
                 "occupancy_models": data.get("occupancy_models", {}),
                 "automation_migration": legacy_automation_inventory(profiles),
-                "migration_readiness": migration_readiness(
-                    legacy_automation_inventory(profiles),
-                    journal,
-                    data.get("calibration", {}),
-                ),
+                "migration_readiness": migration,
+                "kpis": kpis,
+                "autonomy_health": health,
+                "season": season,
+                "anomalies": anomalies,
+                "last_replay": data.get("last_replay", {}),
+                "last_scenario": data.get("last_scenario", {}),
+                "memory_versions": [
+                    {k: s.get(k) for k in ("snapshot_id","created_at","label","reason")}
+                    for s in data.get("memory_versions", [])[-20:]
+                ],
                 "flexible_loads": data.get("flexible_loads", []),
                 "evaluated_at": now.isoformat()}
