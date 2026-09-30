@@ -208,7 +208,7 @@ def register_services(hass):
                 raise ServiceValidationError("Question already answered") from None
             await coordinator.storage.async_save()
         await coordinator.async_request_refresh()
-        return {"question_id": question_id, "status": "answered", "interpretation": interpretation}
+        return {"question_id": question_id, "status": "deferred" if interpretation["kind"] == "deferred" else "answered", "interpretation": interpretation}
 
     async def select_voice_question(call):
         coordinator = runtime()
