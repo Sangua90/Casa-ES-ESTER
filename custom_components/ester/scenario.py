@@ -22,8 +22,8 @@ def simulate_scenario(
 ) -> dict:
     preferences = deepcopy(data.get("preferences", {}))
     for key in list(preferences):
-        if key.startswith("comfort:"):
-            if area_id is None or key == f"comfort:{area_id}":
+        if key.startswith(("comfort:", "seasonal_comfort:")):
+            if area_id is None or key.split(":", 2)[-1] == area_id:
                 try:
                     preferences[key] = float(preferences[key]) + float(comfort_delta_c)
                 except (TypeError, ValueError):

@@ -19,8 +19,13 @@ class EsterPanel extends HTMLElement {
 
   set hass(value) { this._hass = value; if (!this.shadowRoot?.querySelector(".shell")) this.render(); else this.refreshDataOnly(); }
   set panel(value) { this._panel = value; }
-  connectedCallback() { this.render(); }\n\n  refreshDataOnly() {\n    // Home Assistant updates `hass` very frequently. Rebuilding the whole Shadow DOM here\n    // resets native horizontal scrolling on iPhone, making the tab bar jump back to the left.\n    // Keep the current DOM/scroll position; explicit user actions still call render().\n    if (this._tab === "overview") this.startNeuralCore();\n  }
-  disconnectedCallback() { this.stopNeuralCore(); }
+  connectedCallback() { this.render(); }
+
+  refreshDataOnly() {
+    // Preserve scroll position and unsent answers during background updates.
+    if (this._tab === "overview") this.startNeuralCore();
+  }
+  disconnectedCallback() { this._recognition?.abort(); this.stopNeuralCore(); }
 
   state(id) { return this._hass?.states?.[id]; }
   summary() { return this.state("sensor.e_s_t_e_r_summary")?.attributes || {}; }
@@ -191,39 +196,55 @@ class EsterPanel extends HTMLElement {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (SpeechRecognition) {
+      if (this._recognition) { this._recognition.stop(); return; }
       const recognition = new SpeechRecognition();
+      this._recognition = recognition;
       recognition.lang = (this._hass.language || "it").startsWith("it") ? "it-IT" : (this._hass.language || "it-IT");
       recognition.interimResults = true;
       recognition.continuous = targetId === "teach";
-      this._notice = "Ti ascolto…";
-      this.render();
-
-      recognition.onresult = async (event) => {
-        let text = "";
-        let final = false;
-        for (let i=event.resultIndex;i<event.results.length;i++) {
-          text += event.results[i][0].transcript;
-          final = final || event.results[i].isFinal;
+      const original = target.value.trim();
+      let received = false;
+      let failed = false;
+      const report = (message) => {
+        this._notice = message;
+        let notice = this.shadowRoot.querySelector(".notice");
+        if (!notice) {
+          notice = document.createElement("div");
+          notice.className = "notice";
+          this.shadowRoot.querySelector(".shell")?.prepend(notice);
         }
-        target.value = text.trim();
-        if (final && text.trim()) {
-          if (questionId) await this.answer(questionId, text.trim());
-          else if (targetId === "teach") {
-            const combined = text.trim();
-            target.dataset.finalText = combined;
-            target.value = combined;
-            this._notice = "Ti ascolto… puoi continuare a parlare. Premi CAPIRE quando hai finito.";
-          } else {
-            this._notice = "Ho sentito: «" + text.trim() + "»";
-            await this.call("ester","interpret_message",{message:text.trim()});
-          }
-        }
+        notice.setAttribute("role", "status");
+        notice.textContent = message;
       };
-      recognition.onerror = () => {
-        this._notice = "Il browser non riesce ad accedere al microfono. Prova dall'app Home Assistant con Assist.";
-        this.render();
+      report("Ti ascolto… Premi di nuovo PARLA per fermarti.");
+      recognition.onresult = (event) => {
+        const field = this.shadowRoot?.querySelector("#" + CSS.escape(targetId));
+        if (!field) { recognition.abort(); return; }
+        const parts = [];
+        for (let i=0; i<event.results.length; i++) parts.push(event.results[i][0].transcript);
+        const text = parts.join(" ").trim();
+        received = received || Boolean(text);
+        field.value = [original, text].filter(Boolean).join(" ");
       };
-      recognition.start();
+      recognition.onerror = (event) => {
+        failed = true;
+        const messages = {
+          "not-allowed": "Accesso al microfono negato. Consenti il microfono nelle impostazioni del browser oppure scrivi la risposta.",
+          "service-not-allowed": "Il browser non consente la trascrizione vocale. Puoi scrivere la risposta.",
+          "audio-capture": "Microfono non disponibile. Controlla che sia collegato e utilizzabile.",
+          "no-speech": "Non ho sentito parole. Premi PARLA per riprovare.",
+          "network": "Il servizio di trascrizione non è raggiungibile. Puoi riprovare o scrivere.",
+        };
+        report(messages[event.error] || "Trascrizione interrotta. Il testo già scritto resta disponibile.");
+      };
+      recognition.onend = () => {
+        if (this._recognition === recognition) this._recognition = null;
+        if (!failed) report(received ? "Controlla il testo, poi premi " + (questionId ? "INVIA." : "CAPIRE.") : "Non ho ricevuto testo. Premi PARLA per riprovare o scrivi la risposta.");
+      };
+      try { recognition.start(); } catch (_) {
+        this._recognition = null;
+        report("Non riesco ad avviare la trascrizione in questo browser. Puoi scrivere la risposta.");
+      }
       return;
     }
 
@@ -478,17 +499,16 @@ class EsterPanel extends HTMLElement {
       <article class="question-panel">
         <div class="question-index">Q${String(index+1).padStart(2,"0")}</div>
         <div class="question-main">
-          <div class="eyebrow">${this.esc((q.category || "input").toUpperCase())} · CONFIDENCE ${this.pct(q.confidence)} · RISCHIO ${this.esc((q.risk || "—").toUpperCase())}</div>
           <h2>${this.esc(title)}</h2>
           <div class="question-prompt">${this.esc(prompt)}</div>
           <div class="question-context">
-            <div><span>COSA HO OSSERVATO</span><p>${this.esc(observed)}</p></div>
             <div><span>PERCHÉ TE LO CHIEDO</span><p>${this.esc(why)}</p></div>
           </div>
+          <details><summary>Dettagli della domanda</summary><p>${this.esc(observed)}</p><p>${this.esc(q.prompt || "")}</p></details>
           <div class="hint">${this.esc(hint)}</div>
           ${quick.length ? '<div class="quick-row">'+quick.map(x=>`<button class="quick" data-quick-q="${this.esc(q.question_id)}" data-quick-answer="${this.esc(x)}">${this.esc(x)}</button>`).join("")+'</div>' : ''}
           <div class="answer-console">
-            <input id="answer-${this.esc(q.question_id)}" placeholder="Rispondi qui oppure usa il microfono…" />
+            <input id="answer-${this.esc(q.question_id)}" aria-label="La tua risposta" placeholder="Scrivi come parleresti a una persona…" />
             <button class="mic" data-voice-q="${this.esc(q.question_id)}" title="Rispondi a voce">◉ PARLA</button>
             <button class="send" data-answer="${this.esc(q.question_id)}">INVIA</button>
           </div>
@@ -814,7 +834,7 @@ class EsterPanel extends HTMLElement {
     const teachDiscard = this.shadowRoot?.querySelector("#teach-discard");
     if (teachDiscard) teachDiscard.onclick = () => this.discardTeach();
     this.shadowRoot?.querySelectorAll("[data-answer]").forEach(el => el.onclick=()=>this.answer(el.dataset.answer));
-    this.shadowRoot?.querySelectorAll("[data-voice-q]").forEach(el => el.onclick=()=>this.speakQuestion(el.dataset.voiceQ));
+    this.shadowRoot?.querySelectorAll("[data-voice-q]").forEach(el => el.onclick=()=>this.startSpeech("answer-" + el.dataset.voiceQ));
     this.shadowRoot?.querySelectorAll("[data-quick-q]").forEach(el => el.onclick=()=>this.answer(el.dataset.quickQ, el.dataset.quickAnswer));
     this.shadowRoot?.querySelectorAll("[data-quick-question]").forEach(el => el.onclick=()=>this.answer(el.dataset.quickQuestion, el.dataset.quickAnswer));
     this.shadowRoot?.querySelectorAll("[data-mic]").forEach(el => el.onclick=()=>this.startSpeech(el.dataset.mic));

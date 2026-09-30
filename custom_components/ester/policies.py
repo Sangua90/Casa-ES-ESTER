@@ -13,6 +13,7 @@ from .ventilation import ventilation_recommendation
 from .hot_water import hot_water_shadow_plan
 from .economics import heating_costs
 from .occupancy import predicted_occupancy
+from .seasonal import season_context
 
 
 def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None,
@@ -82,12 +83,19 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
             emit("climate", "Temperatura stanza mancante", "Associare un sensore di temperatura ambiente",
                  "Non uso il setpoint del termostato come temperatura misurata.", climates,
                  question=f"Quale sensore misura la temperatura ambiente in {area}?")
-        target = number(preferences.get(f"comfort:{area}"))
+        season = season_context(local_now, None, preferences)["season"]
+        active_modes = {p.state for p in climates} & {"heat", "cool"}
+        if active_modes == {"heat"}:
+            season = "winter"
+        elif active_modes == {"cool"}:
+            season = "summer"
+        target = number(preferences.get(f"seasonal_comfort:{season}:{area}", preferences.get(f"comfort:{area}")))
         if climates and temps:
             if target is None:
                 emit("climate", "Comfort da definire", "Raccogliere la temperatura desiderata",
                      "La temperatura obiettivo non viene dedotta dal nome della stanza.", temps + climates,
-                     question=f"Quale temperatura di comfort in °C desideri per {area}? Usa set_preference comfort:{area}.")
+                     question=f"Quale temperatura di comfort desideri per {area} ({season})?",
+                     evidence={"comfort_season": season, "season_source": "hvac_mode" if len(active_modes) == 1 else "calendar"})
             elif (occupied or expected_now >= 0.5) and "vacation" not in scope_modes:
                 t = sum(numeric_value(p) for p in temps) / len(temps)
                 if abs(t - target) >= 1:
