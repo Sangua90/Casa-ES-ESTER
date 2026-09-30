@@ -1013,13 +1013,13 @@ class EsterPanel extends HTMLElement {
           </div>
 
           <div class="telemetry right">
-            <div class="hud-label">HOUSE / LIVE</div>
+            <div class="hud-label">CASA / ADESSO</div>
             <div class="hud-value">${this.esc((s.season?.season || "—").toUpperCase())}</div>
             <div class="hud-line"></div>
-            <div class="tele-row"><span>AUTONOMY</span><b>${health.overall_ready_for_executor ? "READY" : "BLOCKED"}</b></div>
-            <div class="tele-row"><span>CONFIDENCE</span><b>${this.pct(s.kpis?.avg_confidence)}</b></div>
-            <div class="tele-row"><span>FEEDBACK</span><b>${this.pct(s.kpis?.feedback?.quality_score)}</b></div>
-            <div class="tele-row"><span>MODE</span><b>SHADOW</b></div>
+            <div class="tele-row"><span>AUTONOMIA</span><b>${health.overall_ready_for_executor ? "PRONTA" : "NON PRONTA"}</b></div>
+            <div class="tele-row"><span>SICUREZZA</span><b>${this.pct(s.kpis?.avg_confidence)}</b></div>
+            <div class="tele-row"><span>RISCONTRI</span><b>${this.pct(s.kpis?.feedback?.quality_score)}</b></div>
+            <div class="tele-row"><span>MODALITÀ</span><b>SHADOW</b></div>
           </div>
         </section>
 
@@ -1028,20 +1028,20 @@ class EsterPanel extends HTMLElement {
             <span>EVERYTHING SEEMS TOTALLY EASY, RIGHT?</span>
             <strong>E.S.T.E.R.</strong>
           </div>
-          <div class="live-chip"><i></i> PRE-AUTONOMY SHADOW · REAL ACTUATION DISABLED</div>
+          <div class="live-chip"><i></i> SHADOW ATTIVO · NESSUNA AZIONE REALE</div>
         </section>
 
         <section class="command-deck">
-          <div class="command-head"><span>VOICE / TEXT INPUT</span><b>TEACH E.S.T.E.R.</b></div>
+          <div class="command-head"><span>VOCE / TESTO</span><b>PARLA CON E.S.T.E.R.</b></div>
           <div class="command-input">
             <textarea id="teach" placeholder="Parla o scrivi: «Questo weekend siamo via», «Ester oggi è a casa», «La palestra la uso alle 19»…"></textarea>
             <button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button>
             <button id="teach-send">${this._busy ? "..." : "INVIA"}</button>
           </div>
         </section>
-        <h2 class="section-title">FORECAST CASA</h2>
+        <h2 class="section-title">PREVISIONE CASA</h2>
         ${this.forecastCard()}
-        <h2 class="section-title">LIVE DECISION FEED</h2>
+        <h2 class="section-title">ULTIME DECISIONI</h2>
         ${this.groupedDecisionCards(this.realDecisions().slice(-12))}
       `;
     } else if (this._tab === "decisions") {
@@ -1137,9 +1137,23 @@ class EsterPanel extends HTMLElement {
           .orb{margin:0 auto 16px}
           .teach-row,.answer-row{grid-template-columns:1fr!important;flex-direction:column!important}
           .timeline div{display:grid!important;grid-template-columns:1fr!important;gap:4px!important}
+          .telemetry{clip-path:none!important;border:1px solid #37dff225;background:#031018cc!important;border-radius:10px;text-align:left!important}
+          .telemetry.right{text-align:left!important}
+          .right .tele-row{flex-direction:row!important}
+          .hud-value{font-size:20px!important;margin:4px 0!important}
+          .hud-line{margin:6px 0 8px!important}
+          .tele-row{font-size:11px!important;padding:6px 0!important}
+          .identity-strip{padding:10px 4px 14px!important}
+          .identity-strip span{font-size:8px!important;letter-spacing:.12em!important}
+          .identity-strip strong{font-size:34px!important;letter-spacing:.12em!important}
+          .live-chip{font-size:9px!important;line-height:1.4}
+          .command-deck{padding:12px 8px!important;margin-bottom:16px!important}
+          .command-head{flex-direction:column!important;gap:3px!important}
+          .command-input textarea{min-height:82px;font-size:16px}
+          h2.section-title{margin:20px 0 10px!important;font-size:11px!important;letter-spacing:.16em!important}
           input,select,textarea,button{max-width:100%}
           pre,.code,.technical{max-width:100%;overflow-x:auto;white-space:pre-wrap;overflow-wrap:anywhere}
-        }.simple-status-grid{grid-template-columns:repeat(2,1fr)}.mode-toggle{margin-left:0!important}.view-hud-head{grid-template-columns:72px 1fr;min-height:120px;padding:12px}.view-metric{grid-column:1/-1;text-align:left;border-right:0;border-left:1px solid #54eaff55;padding:8px 0 8px 10px}.mini-reactor{width:64px;height:64px}.model,.migration{align-items:flex-start}.panel-orbit{width:80px;height:80px;min-width:80px}.tele-list{grid-template-columns:1fr}.energy-reactor{width:130px;height:130px;min-width:130px;margin:auto}.jarvis-stage{grid-template-columns:1fr;min-height:600px}.telemetry{position:absolute;width:47%;bottom:6px;padding:12px}.telemetry.left{left:0}.telemetry.right{right:0}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}.identity-strip{align-items:flex-start;flex-direction:column}.command-input{grid-template-columns:1fr}.question-panel{grid-template-columns:1fr;padding:20px}.question-index{display:none}.question-context{grid-template-columns:1fr}.answer-console{grid-template-columns:1fr}.question-main h2{font-size:22px}.question-prompt{font-size:18px}.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:310px;gap:18px;padding:18px;flex-direction:column}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
+        }
       </style>
       <div class="shell">
         ${this._notice ? '<div class="notice">'+this.esc(this._notice)+'</div>' : ''}
