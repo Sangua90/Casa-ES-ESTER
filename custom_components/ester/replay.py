@@ -26,7 +26,7 @@ async def run_historical_replay(hass, coordinator, *, days: int = 7, step_minute
     """Replay historical states through the current Shadow policy engine."""
     if "recorder" not in hass.config.components:
         raise RuntimeError("Recorder is unavailable")
-    days = max(1, min(30, int(days)))
+    days = max(1, min(56, int(days)))
     step_minutes = max(30, min(240, int(step_minutes)))
     now = dt_util.utcnow()
     start = now - timedelta(days=days)
@@ -39,18 +39,32 @@ async def run_historical_replay(hass, coordinator, *, days: int = 7, step_minute
         return {"status": "no_entities", "days": days, "checkpoints": 0}
 
     recorder = get_instance(hass)
-    states = await recorder.async_add_executor_job(partial(
-        get_significant_states,
-        hass,
-        start,
-        now,
-        [p.entity_id for p in profiles],
-        significant_changes_only=False,
-        minimal_response=False,
-        no_attributes=False,
-    ))
+    entity_ids = [p.entity_id for p in profiles]
+    series = {entity_id: [] for entity_id in entity_ids}
 
-    series = {p.entity_id: list(states.get(p.entity_id, [])) for p in profiles}
+    # Read long replays in weekly windows so MariaDB/Recorder is not hit by one
+    # very large history query. Keep one state before each window start so the
+    # replay can reconstruct the state at the first checkpoint of that window.
+    window_start = start
+    while window_start < now:
+        window_end = min(now, window_start + timedelta(days=7))
+        states = await recorder.async_add_executor_job(partial(
+            get_significant_states,
+            hass,
+            window_start,
+            window_end,
+            entity_ids,
+            significant_changes_only=False,
+            minimal_response=False,
+            no_attributes=False,
+            include_start_time_state=True,
+        ))
+        for entity_id in entity_ids:
+            for state in states.get(entity_id, []):
+                seq = series[entity_id]
+                if not seq or seq[-1].last_updated != state.last_updated or seq[-1].state != state.state:
+                    seq.append(state)
+        window_start = window_end
     positions = {p.entity_id: 0 for p in profiles}
     current = {}
     checkpoint = start
@@ -138,7 +152,8 @@ async def run_historical_replay(hass, coordinator, *, days: int = 7, step_minute
         "samples": samples[-250:],
         "shadow_mode": True,
         "actuations": 0,
-        "note": "Historical replay uses current learned models/preferences against past states; it never executes actions.",
+        "history_windows": (days + 6) // 7,
+        "note": "Historical replay reads Recorder in weekly windows and uses current learned models/preferences against past states; it never executes actions.",
     }
     async with coordinator.storage.lock:
         coordinator.storage.data["last_replay"] = report
