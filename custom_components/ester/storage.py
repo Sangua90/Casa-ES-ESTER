@@ -29,6 +29,8 @@ class EsterStorage:
             "questions": [],
             "knowledge": [],
             "pending_teachings": [],
+            "safety_policies": {},
+            "fallback_policies": {},
             "room_thermal_samples": {},
             "thermal_models": {},
             "calibration": {},
