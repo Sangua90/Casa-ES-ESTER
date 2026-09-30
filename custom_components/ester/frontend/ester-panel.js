@@ -503,7 +503,7 @@ class EsterPanel extends HTMLElement {
         <p>Rigioca Recorder con il motore Shadow attuale. Non modifica dispositivi né storico.</p>
         <div class="button-row">
           <button data-replay="7">REPLAY 7 GIORNI</button>
-          <button data-replay="30">REPLAY 30 GIORNI</button>
+          <button data-replay="30">REPLAY 30 GIORNI</button><button data-replay="56">REPLAY 8 SETTIMANE</button>
         </div>
         <div class="metrics compact">
           <div><b>${this.esc(replay.checkpoints ?? "—")}</b><span>CHECKPOINT</span></div>
