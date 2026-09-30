@@ -209,11 +209,10 @@ class EsterPanel extends HTMLElement {
         if (final && text.trim()) {
           if (questionId) await this.answer(questionId, text.trim());
           else if (targetId === "teach") {
-            const previous = target.dataset.finalText || "";
-            const combined = (previous + " " + text.trim()).trim();
+            const combined = text.trim();
             target.dataset.finalText = combined;
             target.value = combined;
-            this._notice = "Ti ascolto… puoi continuare a parlare. Premi INVIA quando hai finito.";
+            this._notice = "Ti ascolto… puoi continuare a parlare. Premi CAPIRE quando hai finito.";
           } else {
             this._notice = "Ho sentito: «" + text.trim() + "»";
             await this.call("ester","interpret_message",{message:text.trim()});
