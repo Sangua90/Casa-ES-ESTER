@@ -4,6 +4,19 @@ import unittest
 
 
 class QuestionClarityTests(unittest.TestCase):
+    def test_seasonal_suggestion_only_learns_on_confirmation(self):
+        for season, degrees in (("winter", 20), ("summer", 26), ("shoulder", 20)):
+            decision = {"decision_id": "d", "category": "climate", "area_id": "salotto",
+                        "title": "Comfort", "reasoning": "", "confidence": .4, "risk": "low",
+                        "evidence": {"question": "Quale comfort?", "comfort_season": season, "season_source": "calendar"}}
+            q = questions.question_from_decision(decision, NOW)
+            self.assertIn(f"{degrees} °C", q["display_prompt"])
+            data = {"questions": [q], "preferences": {"comfort:altra_stanza": 21}}
+            questions.apply_answer(data, q["question_id"], f"{degrees} °C", NOW)
+            self.assertEqual(data["preferences"][f"seasonal_comfort:{season}:salotto"], degrees)
+            self.assertNotIn("comfort:salotto", data["preferences"])
+            self.assertEqual(data["preferences"]["comfort:altra_stanza"], 21)
+
     def test_sensor_question_is_not_a_comfort_preference(self):
         q = {"category": "climate", "area_id": "salotto",
              "prompt": "Quale sensore misura la temperatura ambiente?"}

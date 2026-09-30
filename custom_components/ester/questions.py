@@ -97,6 +97,16 @@ def _friendly_question(decision: dict, prompt: str) -> dict:
             "quick_answers": [],
         })
     base["quick_answers"] = [*base["quick_answers"], "Non lo so"]
+    season = (decision.get("evidence") or {}).get("comfort_season")
+    if category == "climate" and season in {"winter", "summer", "shoulder"}:
+        degrees = 26 if season == "summer" else 20
+        label = {"winter": "riscaldamento", "summer": "raffrescamento", "shoulder": "mezza stagione"}[season]
+        base.update({
+            "display_prompt": f"Per {area_label}, partiamo da {degrees} °C come riferimento per {label}?",
+            "why_asking": "È un punto di partenza da provare, non una temperatura perfetta per tutti. Puoi cambiarlo se senti caldo o freddo.",
+            "answer_hint": "Conferma un valore oppure scrivi quello che preferisci. Salvo la scelta solo per questa stagione; non cambio il termostato. " + ("Il periodo è stimato dal calendario." if decision.get("evidence", {}).get("season_source") == "calendar" else "Mi baso sulla modalità attuale del climatizzatore."),
+            "quick_answers": [f"{degrees} °C", f"{degrees-1} °C", f"{degrees+1} °C", "Non lo so"],
+        })
     return base
 
 def question_from_decision(decision: dict, now: datetime) -> dict | None:
@@ -119,6 +129,7 @@ def question_from_decision(decision: dict, now: datetime) -> dict | None:
         "updated_at": now.isoformat(),
         "answer": None,
         "interpretation": None,
+        "comfort_season": (decision.get("evidence") or {}).get("comfort_season"),
         **friendly,
     }
 
@@ -156,7 +167,7 @@ def merge_questions(existing: list[dict], decisions: list[dict], now: datetime) 
                 question["decision_id"] = item["decision_id"]
                 for field in (
                     "display_title", "display_prompt", "observed",
-                    "why_asking", "answer_hint", "quick_answers",
+                    "why_asking", "answer_hint", "quick_answers", "comfort_season",
                 ):
                     question[field] = item.get(field)
                 continue
@@ -194,7 +205,8 @@ def interpret_answer(question: dict, answer: str) -> dict:
         if temp is not None and any(token in lower for token in ("voglio", "prefer", "comfort", "tieni", "tenere", "gradi", "°")):
             return {
                 "kind": "preference",
-                "key": f"comfort:{area}",
+                "key": (f"seasonal_comfort:{question['comfort_season']}:{area}"
+                        if question.get("comfort_season") in {"winter", "summer", "shoulder"} else f"comfort:{area}"),
                 "value": temp,
                 "confidence": 0.98,
                 "summary": f"Comfort {area}: {temp:g} °C",
