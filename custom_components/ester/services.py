@@ -411,6 +411,8 @@ def register_services(hass):
                 "usage_profiles": coordinator.storage.data.get("usage_profiles", []),
                 "questions": coordinator.storage.data.get("questions", [])[-100:],
                 "knowledge": coordinator.storage.data.get("knowledge", [])[-100:],
+                "knowledge_coverage": data.get("knowledge_coverage", {}),
+                "knowledge_gaps": data.get("knowledge_gaps", []),
                 "thermal_models": data.get("thermal_models", {}),
                 "ventilation_models": data.get("ventilation_models", {}),
                 "hot_water_models": data.get("hot_water_models", {}),
