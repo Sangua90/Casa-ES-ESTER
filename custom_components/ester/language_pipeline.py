@@ -21,7 +21,7 @@ async def interpret_and_store(hass, coordinator, message: str, *, preview: bool 
                      "existing_knowledge":[
                          {"domain":k.get("domain"),"kind":k.get("kind"),"statement":k.get("statement") or k.get("text")}
                          for k in coordinator.storage.data.get("knowledge",[]) if k.get("status","active")=="active"
-                     ][-100:]},
+                     ][-40:]},
         )
         teaching=validate_teaching(response.structured or {},message)
         provider_name=response.provider or "gemini"
