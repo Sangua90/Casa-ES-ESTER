@@ -54,6 +54,44 @@ class GeminiProvider(AIProvider):
         result.confidence = structured.get("confidence")
         return result
 
+    async def async_extract_teaching(self, *, message, context):
+        """Split free speech into non-executable household knowledge items."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string"},
+                "items": {"type": "array", "maxItems": 30, "items": {
+                    "type": "object",
+                    "properties": {
+                        "domain": {"type": "string", "enum": ["presence","climate","lighting","hot_water","energy","ventilation","security","appliances","rooms","other"]},
+                        "kind": {"type": "string", "enum": ["preference","habit","rule","exception","temporary","constraint","fact","goal"]},
+                        "statement": {"type": "string"},
+                        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                        "area_id": {"type": "string"}, "subject": {"type": "string"},
+                        "condition": {"type": "string"}, "time_window": {"type": "string"},
+                        "priority": {"type": "string"}, "supersedes_hint": {"type": "string"},
+                    },
+                    "required": ["domain","kind","statement","confidence"],
+                }},
+            },
+            "required": ["summary","items"],
+        }
+        system = (
+            "Sei il parser di conoscenza domestica di E.S.T.E.R. L'utente parla liberamente in italiano. "
+            "Scomponi il messaggio in informazioni atomiche utili a gestire la casa: preferenze, abitudini, "
+            "regole, eccezioni, vincoli, fatti e obiettivi. Una frase può produrre molti elementi. "
+            "Non creare comandi Home Assistant, automazioni, entity_id o azioni eseguibili. "
+            "Non trasformare 'di solito' in una regola assoluta. Conserva condizioni, orari e priorità nel significato. "
+            "Usa area_id solo se presente nell'elenco allowed_area_ids; altrimenti omettilo. "
+            "Se l'utente corregge una vecchia informazione, descrivi in supersedes_hint quale conoscenza precedente sostituisce. "
+            "Non inventare dettagli mancanti."
+        )
+        result = await self._generate({"message": message, "context": context}, system=system, schema=schema)
+        try: structured = json.loads(result.text)
+        except json.JSONDecodeError as err: raise ValueError("Gemini returned invalid teaching output") from err
+        result.structured = structured
+        return result
+
     async def async_explain(self, *, decision, context):
         return await self._generate({"decision": decision, "context": context})
 
