@@ -21,12 +21,14 @@ from .home import MODES, ROLES
 from .usage import validate_profile
 from .questions import apply_answer
 from .language_pipeline import interpret_and_store
+from .language import store_teaching_items
 from .snapshots import create_snapshot, restore_snapshot, portable_memory
 from .replay import run_historical_replay
 from .scenario import simulate_scenario
 from .discovery import discover_entities
 
 TEXT = vol.All(cv.string, vol.Length(min=1, max=2000))
+TEACH_TEXT = vol.All(cv.string, vol.Length(min=1, max=12000))
 LONG_TEXT = vol.All(cv.string, vol.Length(min=2, max=100000))
 SHORT = vol.All(cv.string, vol.Length(min=1, max=100))
 
@@ -237,9 +239,30 @@ def register_services(hass):
     async def interpret_message(call):
         coordinator = runtime()
         try:
-            return await interpret_and_store(hass, coordinator, call.data["message"])
+            return await interpret_and_store(hass, coordinator, call.data["message"], preview=True)
         except Exception:
             raise HomeAssistantError("Natural-language interpretation failed; no memory was changed") from None
+
+    async def confirm_teaching(call):
+        coordinator=runtime()
+        proposal_id=call.data["proposal_id"]
+        async with coordinator.storage.lock:
+            pending=coordinator.storage.data.setdefault("pending_teachings",[])
+            proposal=next((p for p in pending if p.get("proposal_id")==proposal_id),None)
+            if proposal is None: raise ServiceValidationError("Unknown or expired teaching proposal")
+            checkpoint(coordinator,"Prima di confermare insegnamento",proposal.get("original_text","")[:200])
+            saved=store_teaching_items(coordinator.storage.data,proposal,dt_util.utcnow())
+            coordinator.storage.data["pending_teachings"]=[p for p in pending if p.get("proposal_id")!=proposal_id]
+            await coordinator.storage.async_save()
+        await coordinator.async_request_refresh()
+        return {"saved":len(saved),"summary":f"Ho memorizzato {len(saved)} informazioni confermate.","items":saved}
+
+    async def discard_teaching(call):
+        coordinator=runtime()
+        async with coordinator.storage.lock:
+            pending=coordinator.storage.data.setdefault("pending_teachings",[])
+            coordinator.storage.data["pending_teachings"]=[p for p in pending if p.get("proposal_id")!=call.data["proposal_id"]]
+            await coordinator.storage.async_save()
 
     async def export_memory(call):
         coordinator = runtime()
@@ -365,7 +388,7 @@ def register_services(hass):
             checkpoint(coordinator, "Prima dell'import memoria", "Import JSON")
             for key in allowed:
                 if key in incoming:
-                    expected_dict = key in {"preferences", "classifications"}
+                    expected_dict = key in {"preferences", "classifications", "safety_policies", "fallback_policies"}
                     if expected_dict and not isinstance(incoming[key], dict):
                         raise ServiceValidationError(f"{key} must be an object")
                     if not expected_dict and not isinstance(incoming[key], list):
@@ -389,6 +412,8 @@ def register_services(hass):
                 "usage_profiles": coordinator.storage.data.get("usage_profiles", []),
                 "questions": coordinator.storage.data.get("questions", [])[-100:],
                 "knowledge": coordinator.storage.data.get("knowledge", [])[-100:],
+                "knowledge_coverage": data.get("knowledge_coverage", {}),
+                "knowledge_gaps": data.get("knowledge_gaps", []),
                 "thermal_models": data.get("thermal_models", {}),
                 "ventilation_models": data.get("ventilation_models", {}),
                 "hot_water_models": data.get("hot_water_models", {}),
@@ -454,7 +479,9 @@ def register_services(hass):
         "answer_question": (answer_question, {vol.Required("question_id"): SHORT, vol.Required("answer"): TEXT}),
         "select_voice_question": (select_voice_question, {vol.Required("question_id"): SHORT}),
         "dismiss_question": (dismiss_question, {vol.Required("question_id"): SHORT}),
-        "interpret_message": (interpret_message, {vol.Required("message"): TEXT}),
+        "interpret_message": (interpret_message, {vol.Required("message"): TEACH_TEXT, vol.Optional("preview", default=True): cv.boolean}),
+        "confirm_teaching": (confirm_teaching, {vol.Required("proposal_id"): SHORT}),
+        "discard_teaching": (discard_teaching, {vol.Required("proposal_id"): SHORT}),
         "export_memory": (export_memory, {}),
         "set_flexible_load": (set_flexible_load, {
             vol.Optional("load_id"): SHORT,
@@ -500,4 +527,4 @@ def register_services(hass):
     }
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
-            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)
+            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "confirm_teaching", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)

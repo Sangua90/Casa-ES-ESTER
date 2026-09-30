@@ -2,7 +2,7 @@
 
 DOMAIN = "ester"
 NAME = "E.S.T.E.R."
-VERSION = "1.4.2"
+VERSION = "1.4.3"
 
 PLATFORMS = ["sensor", "text"]
 

@@ -8,6 +8,7 @@ class EsterPanel extends HTMLElement {
     this._decisionCategory = "all";
     this._advanced = false;
     this._notice = "";
+    this._teachDraft = null;
     this._neuralFrame = 0;
     this._neuralResize = null;
     this._neuralStartedAt = 0;
@@ -105,8 +106,53 @@ class EsterPanel extends HTMLElement {
   async teach() {
     const el = this.shadowRoot?.querySelector("#teach");
     const message = el?.value?.trim();
-    if (!message) return;
-    await this.call("ester", "interpret_message", {message});
+    return this.teachText(message);
+  }
+
+  async teachText(message) {
+    if (!message || !this._hass || this._busy) return;
+    this._busy = true;
+    this._notice = "Sto capendo quello che mi hai raccontato…";
+    this.render();
+    try {
+      const result = await this._hass.callWS({
+        type:"call_service", domain:"ester", service:"interpret_message",
+        service_data:{message, preview:true}, return_response:true
+      });
+      this._teachDraft = result?.response || result || null;
+      this._notice = this._teachDraft?.summary || "Controlla quello che ho capito prima di salvarlo.";
+    } catch (err) {
+      this._notice = "Non sono riuscita a interpretare il messaggio: " + (err?.message || "errore");
+    } finally {
+      this._busy = false;
+      this.render();
+    }
+  }
+
+  async confirmTeach() {
+    const token = this._teachDraft?.proposal_id;
+    if (!token || !this._hass || this._busy) return;
+    this._busy = true; this._notice = "Sto salvando le conoscenze confermate…"; this.render();
+    try {
+      const result = await this._hass.callWS({
+        type:"call_service", domain:"ester", service:"confirm_teaching",
+        service_data:{proposal_id:token}, return_response:true
+      });
+      const response = result?.response || result || {};
+      this._teachDraft = null;
+      this._notice = response?.summary || "Conoscenze salvate.";
+      await this._hass.callService("ester","evaluate",{});
+    } catch (err) {
+      this._notice = "Non ho salvato nulla: " + (err?.message || "errore");
+    } finally { this._busy=false; this.render(); }
+  }
+
+  async discardTeach() {
+    const token = this._teachDraft?.proposal_id;
+    if (token && this._hass) {
+      try { await this._hass.callService("ester","discard_teaching",{proposal_id:token}); } catch (_) {}
+    }
+    this._teachDraft=null; this._notice="Proposta scartata. Non ho modificato la memoria."; this.render();
   }
 
   async answer(questionId, quickAnswer=null) {
@@ -148,7 +194,7 @@ class EsterPanel extends HTMLElement {
       const recognition = new SpeechRecognition();
       recognition.lang = (this._hass.language || "it").startsWith("it") ? "it-IT" : (this._hass.language || "it-IT");
       recognition.interimResults = true;
-      recognition.continuous = false;
+      recognition.continuous = targetId === "teach";
       this._notice = "Ti ascolto…";
       this.render();
 
@@ -162,7 +208,12 @@ class EsterPanel extends HTMLElement {
         target.value = text.trim();
         if (final && text.trim()) {
           if (questionId) await this.answer(questionId, text.trim());
-          else {
+          else if (targetId === "teach") {
+            const combined = text.trim();
+            target.dataset.finalText = combined;
+            target.value = combined;
+            this._notice = "Ti ascolto… puoi continuare a parlare. Premi CAPIRE quando hai finito.";
+          } else {
             this._notice = "Ho sentito: «" + text.trim() + "»";
             await this.call("ester","interpret_message",{message:text.trim()});
           }
@@ -617,6 +668,30 @@ class EsterPanel extends HTMLElement {
       </article>`;
   }
 
+  teachView() {
+    const s=this.summary();
+    const knowledge=s.knowledge_items || [];
+    const coverage=s.knowledge_coverage || {};
+    const gaps=s.knowledge_gaps || [];
+    const proposal=this._teachDraft;
+    const domains=["presence","climate","lighting","hot_water","energy","ventilation","security","appliances","rooms","other"];
+    const labels={presence:"PRESENZA / FAMIGLIA",climate:"CLIMA",lighting:"LUCI",hot_water:"ACQUA CALDA",energy:"ENERGIA / FV / BATTERIA",ventilation:"VENTILAZIONE",security:"SICUREZZA",appliances:"ELETTRODOMESTICI",rooms:"STANZE",other:"ALTRO"};
+    const grouped={}; for(const k of knowledge){(grouped[k.domain||"other"] ||= []).push(k);}
+    return `
+      ${this.viewHeader("TEACH / 04","INSEGNA","Raccontami liberamente come vivete la casa. Ti mostro cosa ho capito prima di ricordarlo.",String(knowledge.length),"CONOSCENZE")}
+      <section class="command-deck teach-main">
+        <div class="command-head"><span>VOCE / TESTO</span><b>RACCONTA A E.S.T.E.R.</b></div>
+        <p>Non devi usare parole precise. Puoi parlare di più cose insieme: luci, clima, orari, persone, eccezioni e priorità.</p>
+        <div class="command-input"><textarea id="teach" placeholder="Per esempio: «La sera in salotto vogliamo circa 21 gradi. Se non c'è nessuno non serve scaldarlo. Le luci esterne servono quando rientriamo col buio…»"></textarea><button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button><button id="teach-send">${this._busy?"...":"CAPIRE"}</button></div>
+      </section>
+      ${proposal ? `<h2 class="section-title">QUELLO CHE HO CAPITO</h2><article class="control teach-review"><p>${this.esc(proposal.summary||"Controlla questi punti.")}</p><div class="knowledge-list">${(proposal.items||[]).map(x=>`<div class="knowledge-row"><b>${this.esc(labels[x.domain]||this.categoryLabel(x.domain))}</b><span>${this.esc(x.statement)}</span><small>${this.esc((x.kind||"informazione").replaceAll("_"," "))} · ${this.pct(x.confidence)}</small></div>`).join("")||'<div class="empty">Non ho estratto informazioni affidabili.</div>'}</div><div class="button-row"><button id="teach-confirm">CONFERMA E RICORDA</button><button id="teach-discard">SCARTA</button></div><p class="hint">Finché non confermi, la memoria di E.S.T.E.R. non cambia.</p></article>` : ""}
+      <h2 class="section-title">COSA SO GIÀ</h2>
+      <section class="grid">${domains.map(d=>{const items=grouped[d]||[];const cv=coverage[d]||{};return `<article class="control knowledge-domain"><div class="eyebrow">${labels[d]}</div><h3>${items.length ? "Sto imparando" : "Da insegnare"}</h3><p>${this.esc(cv.meaning|| (items.length ? "Ho già alcune informazioni su questo argomento." : "Non mi hai ancora raccontato abbastanza di questo argomento."))}</p>${items.slice(-5).map(x=>`<div class="knowledge-mini">${this.esc(x.statement||x.text||"")}</div>`).join("")}</article>`}).join("")}</section>
+      <h2 class="section-title">COSA MI MANCA</h2>
+      <section class="grid">${gaps.length?gaps.map(g=>`<article class="decision data-gap"><div class="eyebrow">${this.esc(labels[g.domain]||"CASA")}</div><h3>${this.esc(g.title)}</h3><p>${this.esc(g.why)}</p></article>`).join(""):'<div class="empty">Non vedo lacune importanti da chiederti adesso.</div>'}</section>
+    `;
+  }
+
   configView() {
     const weights = ["safety","comfort","cost","energy","equipment","confidence"];
     const defaults = {safety:1,comfort:.75,cost:.6,energy:.65,equipment:.55,confidence:.9};
@@ -734,6 +809,10 @@ class EsterPanel extends HTMLElement {
     if (modeToggle) modeToggle.onclick = () => { this._advanced = !this._advanced; this.render(); };
     const teach = this.shadowRoot?.querySelector("#teach-send");
     if (teach) teach.onclick = () => this.teach();
+    const teachConfirm = this.shadowRoot?.querySelector("#teach-confirm");
+    if (teachConfirm) teachConfirm.onclick = () => this.confirmTeach();
+    const teachDiscard = this.shadowRoot?.querySelector("#teach-discard");
+    if (teachDiscard) teachDiscard.onclick = () => this.discardTeach();
     this.shadowRoot?.querySelectorAll("[data-answer]").forEach(el => el.onclick=()=>this.answer(el.dataset.answer));
     this.shadowRoot?.querySelectorAll("[data-voice-q]").forEach(el => el.onclick=()=>this.speakQuestion(el.dataset.voiceQ));
     this.shadowRoot?.querySelectorAll("[data-quick-q]").forEach(el => el.onclick=()=>this.answer(el.dataset.quickQ, el.dataset.quickAnswer));
@@ -982,7 +1061,7 @@ class EsterPanel extends HTMLElement {
     const thought = this.thoughtState();
 
     const tabs = [
-      ["overview","CORE"],["decisions","DECISIONI"],["questions","DOMANDE"],
+      ["overview","CORE"],["decisions","DECISIONI"],["questions","DOMANDE"],["teach","INSEGNA"],
       ["energy","ENERGIA"],["learning","APPRENDIMENTO"],["validation","VALIDAZIONE"],
       ["migration","MIGRAZIONE"],["config","CONFIG"]
     ];
@@ -1013,13 +1092,13 @@ class EsterPanel extends HTMLElement {
           </div>
 
           <div class="telemetry right">
-            <div class="hud-label">HOUSE / LIVE</div>
+            <div class="hud-label">CASA / ADESSO</div>
             <div class="hud-value">${this.esc((s.season?.season || "—").toUpperCase())}</div>
             <div class="hud-line"></div>
-            <div class="tele-row"><span>AUTONOMY</span><b>${health.overall_ready_for_executor ? "READY" : "BLOCKED"}</b></div>
-            <div class="tele-row"><span>CONFIDENCE</span><b>${this.pct(s.kpis?.avg_confidence)}</b></div>
-            <div class="tele-row"><span>FEEDBACK</span><b>${this.pct(s.kpis?.feedback?.quality_score)}</b></div>
-            <div class="tele-row"><span>MODE</span><b>SHADOW</b></div>
+            <div class="tele-row"><span>AUTONOMIA</span><b>${health.overall_ready_for_executor ? "PRONTA" : "NON PRONTA"}</b></div>
+            <div class="tele-row"><span>SICUREZZA</span><b>${this.pct(s.kpis?.avg_confidence)}</b></div>
+            <div class="tele-row"><span>RISCONTRI</span><b>${this.pct(s.kpis?.feedback?.quality_score)}</b></div>
+            <div class="tele-row"><span>MODALITÀ</span><b>SHADOW</b></div>
           </div>
         </section>
 
@@ -1028,20 +1107,17 @@ class EsterPanel extends HTMLElement {
             <span>EVERYTHING SEEMS TOTALLY EASY, RIGHT?</span>
             <strong>E.S.T.E.R.</strong>
           </div>
-          <div class="live-chip"><i></i> PRE-AUTONOMY SHADOW · REAL ACTUATION DISABLED</div>
+          <div class="live-chip"><i></i> SHADOW ATTIVO · NESSUNA AZIONE REALE</div>
         </section>
 
         <section class="command-deck">
-          <div class="command-head"><span>VOICE / TEXT INPUT</span><b>TEACH E.S.T.E.R.</b></div>
-          <div class="command-input">
-            <textarea id="teach" placeholder="Parla o scrivi: «Questo weekend siamo via», «Ester oggi è a casa», «La palestra la uso alle 19»…"></textarea>
-            <button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button>
-            <button id="teach-send">${this._busy ? "..." : "INVIA"}</button>
-          </div>
+          <div class="command-head"><span>CONOSCENZA CASA</span><b>INSEGNA A E.S.T.E.R.</b></div>
+          <p>Per raccontarmi come vivete la casa, cosa preferite e le eccezioni, usa la sezione INSEGNA. Prima di ricordare qualcosa ti farò sempre controllare cosa ho capito.</p>
+          <button data-tab="teach">APRI INSEGNA</button>
         </section>
-        <h2 class="section-title">FORECAST CASA</h2>
+        <h2 class="section-title">PREVISIONE CASA</h2>
         ${this.forecastCard()}
-        <h2 class="section-title">LIVE DECISION FEED</h2>
+        <h2 class="section-title">ULTIME DECISIONI</h2>
         ${this.groupedDecisionCards(this.realDecisions().slice(-12))}
       `;
     } else if (this._tab === "decisions") {
@@ -1049,6 +1125,8 @@ class EsterPanel extends HTMLElement {
       body = this.viewHeader("DECISION / 02","DECISIONI","Le scelte che E.S.T.E.R. avrebbe eseguito, ordinate per dominio.",this.pct(s.kpis?.avg_confidence),"CONFIDENCE")+'<h2 class="section-title">DECISIONI CHE E.S.T.E.R. AVREBBE PRESO</h2><article class="control decision-explainer"><p>Le decisioni sono raggruppate per tipo, così puoi leggere subito Energia, Clima, Sicurezza, Luci e gli altri domini separatamente.</p><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
     } else if (this._tab === "questions") {
       body = this.viewHeader("QUESTIONS / 03","DOMANDE","Informazioni che E.S.T.E.R. ti chiede per ridurre l'incertezza.",String(questionCount),"APERTE")+'<h2 class="section-title">QUESTION INBOX · DIMMI QUELLO CHE MANCA</h2><article class="control"><p>Le domande sono raggruppate per argomento, così puoi rispondere prima a Energia, Clima, Sicurezza o agli altri gruppi senza mescolare tutto.</p></article>'+this.groupedQuestionCards();
+    } else if (this._tab === "teach") {
+      body = this.teachView();
     } else if (this._tab === "energy") {
       body = this.viewHeader("ENERGY / 04","ENERGIA","Planner integrato FV, rete, batteria, limiti e carichi flessibili.",this.esc((s.daily_forecast?.energy_strategy||"LEARNING").replaceAll("_"," ").toUpperCase()),"STRATEGY")+'<h2 class="section-title">ENERGY MANAGER INTEGRATO</h2>'+this.energyCard()+
         '<h2 class="section-title">ULTIME DECISIONI ENERGIA</h2>'+
@@ -1099,11 +1177,66 @@ class EsterPanel extends HTMLElement {
         .decision-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.confidence-block{text-align:right;font-family:monospace}.confidence-block span{display:block;font-size:8px;letter-spacing:.18em;color:#4eaabb}.confidence-block b{font-size:28px;font-weight:400;color:#c9fbff;text-shadow:0 0 12px #4eeaff55}.decision-section{margin:14px 0;padding-left:13px;border-left:1px solid #45e9ff55}.decision-section span{display:block;font-size:9px;letter-spacing:.17em;color:#4cb4c4;margin-bottom:5px}.decision-section strong{font-size:17px;font-weight:400;color:#dcfbff}.decision-section p{margin:0;color:#91c0c8;line-height:1.45}.decision-explainer{margin-bottom:14px}.decision h3,.question h3,.migration h3,.model h3{margin:5px 0 10px;color:#e9fdff}.confidence{font-family:monospace;font-size:25px;color:#68efff}.meter{height:3px;background:#0e2a34;margin:8px 0 14px}.meter span{display:block;height:100%;background:#53edff;box-shadow:0 0 10px #2ae8ff}.decision p,.question p,.energy-core p,.control p,.health p{color:#9dc5cf;line-height:1.5}.proposal{padding:10px 12px;background:#06222c;border-left:2px solid #50e9ff;color:#c8f8ff;margin-top:12px}.meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:#4fa3b3;font-family:monospace;font-size:10px;margin-top:13px}
         .answer-row input{flex:1;min-width:180px}.mic-btn{border-radius:999px;border-color:#69f2ff;box-shadow:0 0 14px #00d9ff44;background:radial-gradient(circle,#0b3444,#041018)}.big-mic{min-width:112px}.quick-row{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.quick{padding:7px 10px;font-size:11px}.question-focus{display:grid;grid-template-columns:120px 1fr;gap:18px;align-items:start}.question-radar{position:relative;width:108px;height:108px;border-radius:50%;border:1px solid #69efff99;display:grid;place-items:center;background:radial-gradient(circle,#0bdcff24 0,#031018 58%,transparent 59%);box-shadow:0 0 25px #00dcff22,inset 0 0 25px #00dcff18}.radar-ring{position:absolute;border:1px solid #43e8ff66;border-radius:50%}.rr1{inset:12%;border-style:dashed;animation:spin 9s linear infinite}.rr2{inset:28%;animation:spin 5s linear reverse infinite}.radar-value{font:700 20px monospace;color:#c9fbff;text-shadow:0 0 12px #56eaff}.question-block{margin:10px 0;padding:9px 12px;border-left:2px solid #28dff2;background:linear-gradient(90deg,#09202a88,transparent)}.question-block span{display:block;font-size:9px;letter-spacing:.18em;color:#49c6dc}.question-block p{margin:5px 0}.question-block.ask{border-left-color:#fff}.question-block.why{border-left-color:#6ff7d0}.hint{font-size:12px;color:#7db5c0;font-style:italic;margin:8px 0}.energy-core{display:flex;align-items:center;gap:35px}.orb{width:150px;height:150px;border-radius:50%;border:1px solid #4dedff;display:grid;place-items:center;box-shadow:0 0 30px #00d9ff45,inset 0 0 35px #00d9ff25;flex:0 0 auto}.orb-core{width:48px;height:48px;border-radius:50%;background:#c9fbff;box-shadow:0 0 50px #16e5ff}.energy-data{flex:1}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metrics.compact b{font-size:19px}.status{font-family:monospace;color:#6ff6cb}.model pre{white-space:pre-wrap;max-height:310px;overflow:auto;color:#7eb9c5;font-size:11px}.empty{padding:30px;color:#6c9da8;border:1px dashed #1bd5ef35;border-radius:10px}
         .health.ok{border-color:#5dffc16b}.health.warn{border-color:#ffc95d59}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:10px 0}.form-grid.one{grid-template-columns:1fr auto}.form-grid label{font-size:11px;color:#68c9da;letter-spacing:.08em}.form-grid label input,.form-grid label select{margin-top:5px}.timeline{display:grid;gap:7px;margin-top:12px}.timeline div{display:flex;justify-content:space-between;gap:15px;padding:9px;border-bottom:1px solid #1cdff322}.timeline span{color:#7bbcca;font-size:12px}
-        @media(max-width:800px){.simple-status-grid{grid-template-columns:repeat(2,1fr)}.mode-toggle{margin-left:0!important}.view-hud-head{grid-template-columns:72px 1fr;min-height:120px;padding:12px}.view-metric{grid-column:1/-1;text-align:left;border-right:0;border-left:1px solid #54eaff55;padding:8px 0 8px 10px}.mini-reactor{width:64px;height:64px}.model,.migration{align-items:flex-start}.panel-orbit{width:80px;height:80px;min-width:80px}.tele-list{grid-template-columns:1fr}.energy-reactor{width:130px;height:130px;min-width:130px;margin:auto}.jarvis-stage{grid-template-columns:1fr;min-height:600px}.telemetry{position:absolute;width:47%;bottom:6px;padding:12px}.telemetry.left{left:0}.telemetry.right{right:0}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}.identity-strip{align-items:flex-start;flex-direction:column}.command-input{grid-template-columns:1fr}.question-panel{grid-template-columns:1fr;padding:20px}.question-index{display:none}.question-context{grid-template-columns:1fr}.answer-console{grid-template-columns:1fr}.question-main h2{font-size:22px}.question-prompt{font-size:18px}.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:310px;gap:18px;padding:18px;flex-direction:column}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
+        @media(max-width:800px){
+          :host{overflow-x:hidden}
+          .shell{width:100%;max-width:100vw;padding:8px 10px 34px;overflow-x:hidden}
+          .mobile-nav-wrap{position:sticky;top:0;z-index:20;margin:0 -10px 12px;padding:7px 10px 9px;background:linear-gradient(#03080d 72%,#03080de8 88%,transparent)}
+          nav{position:relative;top:auto;z-index:auto;display:flex;flex-wrap:nowrap;gap:7px;width:100%;max-width:100%;overflow-x:auto;overflow-y:hidden;padding:2px 1px 8px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x;scrollbar-width:none;background:none}
+          nav::-webkit-scrollbar{display:none}
+          nav button{flex:0 0 auto;min-width:max-content;padding:9px 12px;font-size:11px;white-space:nowrap;scroll-snap-align:center}
+          nav button.active{position:relative}
+          .mode-toggle{display:block;width:100%;margin:2px 0 0!important;padding:8px 10px;font-size:10px}
+          .view-hud-head{grid-template-columns:58px minmax(0,1fr)!important;min-height:auto!important;padding:10px!important;gap:9px}
+          .view-hud-head>div,.question-main,.model>div,.migration>div,.telemetry,.card,.panel{min-width:0}
+          .view-hud-head h1,.view-hud-head h2,.section-title,.question-main h2{overflow-wrap:anywhere;word-break:normal}
+          .view-hud-head h1{font-size:24px!important;letter-spacing:.06em}
+          .view-hud-head p,.question-prompt,.question-context,.decision-copy,.tele-list,.timeline{overflow-wrap:anywhere}
+          .view-metric{grid-column:1/-1!important;text-align:left!important;border-right:0!important;border-left:1px solid #54eaff55;padding:7px 0 7px 9px!important}
+          .mini-reactor{width:52px!important;height:52px!important}
+          .jarvis-stage{display:flex!important;flex-direction:column;justify-content:flex-start;min-height:0!important;gap:8px;padding:10px 0 14px;overflow:visible!important}
+          .jarvis-stage:before,.jarvis-stage:after{display:none}
+          .jarvis{order:1;width:min(86vw,330px)!important;height:min(86vw,330px)!important;min-width:0!important;min-height:0!important;flex:0 0 auto}
+          .telemetry{position:relative!important;inset:auto!important;width:100%!important;order:2;padding:10px!important}
+          .telemetry.right{order:3}
+          .neural-caption{left:2%!important;right:2%!important;bottom:5%!important}
+          .neural-caption strong{font-size:11px!important;letter-spacing:.12em!important}
+          .neural-caption span{font-size:9px!important;line-height:1.35!important;padding:0 12px}
+          .identity-strip{display:flex!important;align-items:flex-start!important;flex-direction:column!important;gap:8px}
+          .simple-status-grid,.stats,.metrics{grid-template-columns:1fr!important}
+          .grid,.tele-list,.question-context,.answer-console,.question-focus,.question-panel,.command-input,.form-grid,.form-grid.one{grid-template-columns:1fr!important}
+          .question-panel{padding:12px!important}
+          .question-index{display:none!important}
+          .question-main h2{font-size:20px!important;line-height:1.15}
+          .question-prompt{font-size:16px!important;line-height:1.4}
+          .model,.migration{align-items:flex-start;flex-direction:column!important}
+          .panel-orbit{width:70px!important;height:70px!important;min-width:70px!important}
+          .energy-core{display:block!important}
+          .energy-reactor{width:116px!important;height:116px!important;min-width:116px!important;margin:0 auto 12px}
+          .orb{margin:0 auto 16px}
+          .teach-row,.answer-row{grid-template-columns:1fr!important;flex-direction:column!important}
+          .timeline div{display:grid!important;grid-template-columns:1fr!important;gap:4px!important}
+          .telemetry{clip-path:none!important;border:1px solid #37dff225;background:#031018cc!important;border-radius:10px;text-align:left!important}
+          .telemetry.right{text-align:left!important}
+          .right .tele-row{flex-direction:row!important}
+          .hud-value{font-size:20px!important;margin:4px 0!important}
+          .hud-line{margin:6px 0 8px!important}
+          .tele-row{font-size:11px!important;padding:6px 0!important}
+          .identity-strip{padding:10px 4px 14px!important}
+          .identity-strip span{font-size:8px!important;letter-spacing:.12em!important}
+          .identity-strip strong{font-size:34px!important;letter-spacing:.12em!important}
+          .live-chip{font-size:9px!important;line-height:1.4}
+          .command-deck{padding:12px 8px!important;margin-bottom:16px!important}
+          .command-head{flex-direction:column!important;gap:3px!important}
+          .command-input textarea{min-height:82px;font-size:16px}
+          .knowledge-row{display:grid;gap:4px;padding:10px 0;border-bottom:1px solid #1cdff322}.knowledge-row span,.knowledge-mini{overflow-wrap:anywhere}.knowledge-row small{color:#68aebb}.knowledge-mini{padding:8px 0;color:#a9d2d9;border-bottom:1px solid #1cdff31a}
+          h2.section-title{margin:20px 0 10px!important;font-size:11px!important;letter-spacing:.16em!important}
+          input,select,textarea,button{max-width:100%}
+          pre,.code,.technical{max-width:100%;overflow-x:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+        }
       </style>
       <div class="shell">
         ${this._notice ? '<div class="notice">'+this.esc(this._notice)+'</div>' : ''}
-        <nav>${tabs.map(([id,label])=>`<button data-tab="${id}" class="${this._tab===id?"active":""}">${label}</button>`).join("")}<button id="mode-toggle" class="mode-toggle">${this._advanced?"MODALITÀ SEMPLICE":"DETTAGLI TECNICI"}</button></nav>
+        <div class="mobile-nav-wrap"><nav id="ester-nav">${tabs.map(([id,label])=>`<button data-tab="${id}" class="${this._tab===id?"active":""}">${label}</button>`).join("")}</nav><button id="mode-toggle" class="mode-toggle">${this._advanced?"MODALITÀ SEMPLICE":"DETTAGLI TECNICI"}</button></div>
         ${body}
       </div>
     `;

@@ -34,6 +34,7 @@ from .health import autonomy_health
 from .seasonal import season_context
 from .anomaly import detect_anomalies
 from .daily_forecast import daily_forecast
+from .language import knowledge_overview
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -235,6 +236,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             data.get("questions", []),
             anomalies,
         )
+        knowledge_coverage, knowledge_gaps = knowledge_overview(data)
         return {"inventory": inventory, "rooms": home_model(profiles, learning),
                 "profiles": {p.entity_id: p.as_dict() for p in profiles}, "latest_decisions": latest,
                 "decision_count": len(journal), "contexts": contexts, "usage": usage,
@@ -261,6 +263,9 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                     for s in data.get("memory_versions", [])[-20:]
                 ],
                 "daily_forecast": day_forecast,
+                "knowledge_items": [k for k in data.get("knowledge", []) if k.get("status","active")=="active"][-200:],
+                "knowledge_coverage": knowledge_coverage,
+                "knowledge_gaps": knowledge_gaps,
                 "decision_history": journal[-100:],
                 "flexible_loads": data.get("flexible_loads", []),
                 "evaluated_at": now.isoformat()}

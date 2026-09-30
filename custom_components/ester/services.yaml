@@ -214,14 +214,34 @@ dismiss_question:
         text: {}
 
 interpret_message:
-  name: "Insegna a E.S.T.E.R."
-  description: "Interpreta una frase come memoria, contesto, preferenza o routine. Non comanda dispositivi."
+  name: "Fai capire a E.S.T.E.R."
+  description: "Interpreta la dettatura e prepara una proposta strutturata. Non modifica la memoria finché non viene confermata e non comanda dispositivi."
   fields:
     message:
       name: "Messaggio"
       selector:
         text:
           multiline: true
+    preview:
+      name: "Anteprima"
+      selector:
+        boolean: {}
+confirm_teaching:
+  name: "Conferma insegnamento"
+  description: "Salva nella conoscenza E.S.T.E.R. una proposta già interpretata e confermata dall'utente."
+  fields:
+    proposal_id:
+      name: "ID proposta"
+      selector:
+        text: {}
+discard_teaching:
+  name: "Scarta insegnamento"
+  description: "Elimina una proposta non confermata senza modificare la conoscenza."
+  fields:
+    proposal_id:
+      name: "ID proposta"
+      selector:
+        text: {}
 
 export_memory:
   name: "Esporta memoria"

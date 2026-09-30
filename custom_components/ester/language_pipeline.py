@@ -1,56 +1,42 @@
-"""HA-facing natural-language interpreter. Gemini is optional and never actuates devices."""
+"""HA-facing natural-language teaching. AI proposes; user confirms; no device actuation."""
 from __future__ import annotations
 
+from uuid import uuid4
 from .ai.factory import create_provider
-from .language import apply_interpretation, local_interpret, validate_interpretation
-from .snapshots import create_snapshot
+from .language import local_interpret, validate_teaching
 from homeassistant.util import dt as dt_util
 
 
-async def interpret_and_store(hass, coordinator, message: str) -> dict:
-    area_ids = sorted((coordinator.data or {}).get("rooms", {}).keys())
-    parsed = local_interpret(message, area_ids)
-    provider_name = "local"
-
-    options = coordinator.entry.options
-    if options.get("ai_provider", "disabled") != "disabled" and parsed.get("confidence", 0) < 0.9:
-        provider = create_provider(hass, options)
-        response = await provider.async_interpret(
+async def interpret_and_store(hass, coordinator, message: str, *, preview: bool = True) -> dict:
+    """Create a pending teaching proposal. Memory is unchanged until confirmation."""
+    area_ids=sorted((coordinator.data or {}).get("rooms",{}).keys())
+    options=coordinator.entry.options
+    provider_name="local"
+    teaching=None
+    if options.get("ai_provider","disabled")!="disabled":
+        provider=create_provider(hass,options)
+        response=await provider.async_extract_teaching(
             message=message,
-            context={
-                "shadow_mode": True,
-                "allowed_area_ids": area_ids,
-                "open_question_titles": [
-                    q.get("title") for q in (coordinator.data or {}).get("questions", [])[:10]
-                ],
-            },
+            context={"shadow_mode":True,"allowed_area_ids":area_ids,
+                     "existing_knowledge":[
+                         {"domain":k.get("domain"),"kind":k.get("kind"),"statement":k.get("statement") or k.get("text")}
+                         for k in coordinator.storage.data.get("knowledge",[]) if k.get("status","active")=="active"
+                     ][-40:]},
         )
-        if response.structured:
-            parsed = validate_interpretation(response.structured)
-            parsed["text"] = message
-            if parsed.get("area_id") and parsed["area_id"] not in area_ids:
-                parsed = {"intent": "knowledge_note", "confidence": 0.4, "text": message}
-            provider_name = response.provider or "gemini"
+        teaching=validate_teaching(response.structured or {},message)
+        provider_name=response.provider or "gemini"
+    else:
+        # Safe local fallback: preserve the statement as one proposed fact.
+        parsed=local_interpret(message,area_ids)
+        domain="climate" if str(parsed.get("key","")).startswith("comfort:") else "other"
+        teaching=validate_teaching({"summary":"Ho conservato la frase come informazione da confermare.",
+                                    "items":[{"domain":domain,"kind":"fact","statement":message,"confidence":parsed.get("confidence",.5),
+                                              **({"area_id":parsed["area_id"]} if parsed.get("area_id") else {})}]},message)
 
+    proposal={"proposal_id":str(uuid4()),"created_at":dt_util.utcnow().isoformat(),"provider":provider_name,
+              "summary":teaching["summary"],"items":teaching["items"],"original_text":message[:2000]}
     async with coordinator.storage.lock:
-        create_snapshot(
-            coordinator.storage.data,
-            dt_util.utcnow(),
-            "Prima di insegnamento naturale",
-            message[:200],
-        )
-        result = apply_interpretation(
-            coordinator.storage.data,
-            parsed,
-            dt_util.utcnow(),
-        )
+        pending=coordinator.storage.data.setdefault("pending_teachings",[])
+        pending.append(proposal); del pending[:-20]
         await coordinator.storage.async_save()
-
-    await coordinator.async_request_refresh()
-    return {
-        "provider": provider_name,
-        "interpretation": parsed,
-        "memory_result": result,
-        "shadow_mode": True,
-        "device_action": False,
-    }
+    return {**proposal,"shadow_mode":True,"device_action":False,"memory_changed":False}

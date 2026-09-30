@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, VERSION
 from .coordinator import EsterCoordinator
 
 
@@ -47,7 +47,7 @@ class EsterBaseSensor(CoordinatorEntity[EsterCoordinator], SensorEntity):
             "name": "E.S.T.E.R.",
             "manufacturer": "Casa ES",
             "model": "Intelligent Home Manager",
-            "sw_version": "1.4.0",
+            "sw_version": VERSION,
         }
 
 
@@ -143,7 +143,7 @@ class EsterSummarySensor(EsterBaseSensor):
     """Compact UI summary, with full details available through get_summary."""
     _attr_name = "Summary"
     _attr_icon = "mdi:home-analytics"
-    _unrecorded_attributes = frozenset({"rooms", "contexts", "history", "usage", "thermal_models", "ventilation_models", "hot_water_models", "occupancy_models", "migration_readiness", "kpis", "autonomy_health", "anomalies", "last_replay", "last_scenario", "memory_versions", "daily_forecast", "decision_history", "usage_profile_items", "flexible_loads"})
+    _unrecorded_attributes = frozenset({"rooms", "contexts", "history", "usage", "thermal_models", "ventilation_models", "hot_water_models", "occupancy_models", "migration_readiness", "kpis", "autonomy_health", "anomalies", "last_replay", "last_scenario", "memory_versions", "daily_forecast", "decision_history", "usage_profile_items", "flexible_loads", "knowledge_items", "knowledge_coverage", "knowledge_gaps"})
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry, "summary")
@@ -176,6 +176,9 @@ class EsterSummarySensor(EsterBaseSensor):
                 "last_scenario": data.get("last_scenario", {}),
                 "memory_versions": data.get("memory_versions", []),
                 "daily_forecast": data.get("daily_forecast", {}),
+                "knowledge_items": data.get("knowledge_items", []),
+                "knowledge_coverage": data.get("knowledge_coverage", {}),
+                "knowledge_gaps": data.get("knowledge_gaps", []),
                 "decision_history": data.get("decision_history", []),
                 "usage_profile_items": data.get("usage_profiles", []),
                 "flexible_loads": data.get("flexible_loads", [])}

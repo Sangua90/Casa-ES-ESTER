@@ -8,11 +8,12 @@ from uuid import uuid4
 SNAPSHOT_KEYS = (
     "preferences", "classifications", "usage_profiles", "knowledge",
     "context_events", "flexible_loads",
+    "safety_policies", "fallback_policies",
 )
 
 
 def portable_memory(data: dict) -> dict:
-    return {key: deepcopy(data.get(key, {} if key in {"preferences", "classifications"} else []))
+    return {key: deepcopy(data.get(key, {} if key in {"preferences", "classifications", "safety_policies", "fallback_policies"} else []))
             for key in SNAPSHOT_KEYS}
 
 

@@ -33,6 +33,15 @@ class AIProvider(ABC):
         """Interpret a user message against E.S.T.E.R. context."""
         raise NotImplementedError
 
+    async def async_extract_teaching(
+        self,
+        *,
+        message: str,
+        context: dict[str, Any],
+    ) -> AIResponse:
+        """Extract structured household knowledge without executing anything."""
+        return await self.async_interpret(message=message, context=context)
+
     @abstractmethod
     async def async_explain(
         self,
