@@ -754,6 +754,21 @@ class EsterPanel extends HTMLElement {
     if (filter) filter.onchange=()=>{this._decisionCategory=filter.value;this.render();};
   }
 
+  thoughtState() {
+    const s = this.summary();
+    const q = Number(this.state("sensor.e_s_t_e_r_questions")?.state || 0);
+    const replay = s.last_replay || {};
+    const anomalies = s.anomalies || [];
+    const decisions = this.latest();
+    const newest = decisions[decisions.length-1];
+
+    if (replay.status === "running") return {mode:"replay",label:"RILEGGO IL PASSATO",detail:"Sto confrontando lo storico con ciò che avrei deciso oggi.",pulse:"fast"};
+    if (anomalies.length) return {mode:"alert",label:"STO VERIFICANDO",detail:"Ho trovato dati che meritano controllo.",pulse:"alert"};
+    if (q > 0) return {mode:"waiting",label:"MI MANCA UN'INFORMAZIONE",detail:"Sto aspettando una tua risposta per decidere meglio.",pulse:"slow"};
+    if (newest) return {mode:"thinking",label:"STO RAGIONANDO",detail:"Sto confrontando stato attuale, abitudini, costi e sicurezza.",pulse:"normal"};
+    return {mode:"observing",label:"STO OSSERVANDO",detail:"Raccolgo dati e imparo il comportamento della casa.",pulse:"slow"};
+  }
+
   render() {
     if (!this.shadowRoot) return;
     const s = this.summary();
@@ -762,6 +777,7 @@ class EsterPanel extends HTMLElement {
     const questionCount = this.state("sensor.e_s_t_e_r_questions")?.state || "0";
     const observed = this.state("sensor.e_s_t_e_r_observed_entities")?.state || "0";
     const health = s.autonomy_health || {};
+    const thought = this.thoughtState();
 
     const tabs = [
       ["overview","CORE"],["decisions","DECISIONI"],["questions","DOMANDE"],
@@ -778,18 +794,28 @@ class EsterPanel extends HTMLElement {
             <div class="hud-label">SYSTEM / 01</div>
             <div class="hud-value">${this.esc(status.toUpperCase())}</div>
             <div class="hud-line"></div>
-            <div class="tele-row"><span>NODI</span><b>${this.esc(observed)}</b></div>
+            <div class="tele-row"><span>STATO</span><b>${this.esc(thought.label)}</b></div>
             <div class="tele-row"><span>DECISIONI</span><b>${this.esc(decisionCount)}</b></div>
             <div class="tele-row"><span>DOMANDE</span><b>${this.esc(questionCount)}</b></div>
             <div class="tele-row"><span>ATTUAZIONI</span><b>0</b></div>
           </div>
 
-          <div class="jarvis">
+          <div class="jarvis thought-core ${this.esc(thought.pulse)}" data-mode="${this.esc(thought.mode)}">
             <div class="ring r0"></div><div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
             <div class="tick-ring"></div>
-            <div class="core-letter">E</div>
+            <div class="thought-field">
+              <div class="thought-wave w1"></div>
+              <div class="thought-wave w2"></div>
+              <div class="thought-wave w3"></div>
+              <div class="thought-node n1"></div>
+              <div class="thought-node n2"></div>
+              <div class="thought-node n3"></div>
+              <div class="thought-node n4"></div>
+              <div class="thought-brain"></div>
+            </div>
             <div class="scan-line"></div>
-            <div class="core-caption">HOME INTELLIGENCE CORE</div>
+            <div class="thought-label">${this.esc(thought.label)}</div>
+            <div class="thought-detail">${this.esc(thought.detail)}</div>
           </div>
 
           <div class="telemetry right">
@@ -853,7 +879,9 @@ class EsterPanel extends HTMLElement {
 .jarvis-stage{min-height:430px;position:relative;display:grid;grid-template-columns:minmax(210px,1fr) minmax(300px,460px) minmax(210px,1fr);align-items:center;gap:26px;overflow:hidden;border-top:1px solid #64eaff3a;border-bottom:1px solid #64eaff24;background:radial-gradient(circle at 50% 50%,#0b52602b 0,transparent 45%),linear-gradient(90deg,transparent,#04121999 18%,#021017d9 50%,#04121999 82%,transparent);box-shadow:inset 0 0 120px #00d9ff0b}
         .jarvis-stage:before,.jarvis-stage:after{content:"";position:absolute;top:9%;bottom:9%;width:1px;background:linear-gradient(transparent,#5aefff88,transparent);box-shadow:0 0 12px #00dcff}.jarvis-stage:before{left:5%}.jarvis-stage:after{right:5%}
         .hud-grid{position:absolute;inset:0;background-image:linear-gradient(#35dff708 1px,transparent 1px),linear-gradient(90deg,#35dff708 1px,transparent 1px);background-size:30px 30px;mask-image:radial-gradient(circle at center,#000 10%,transparent 75%)}
-        .jarvis{width:min(31vw,390px);height:min(31vw,390px);min-width:290px;min-height:290px;position:relative;border-radius:50%;display:grid;place-items:center;margin:auto;filter:drop-shadow(0 0 34px #00d9ff30)}.ring{position:absolute;border:1px solid #48eaff;border-radius:50%;box-shadow:0 0 18px #00d9ff38,inset 0 0 18px #00d9ff20}.r0{inset:0;border-style:dotted;opacity:.42;animation:spin 31s linear reverse infinite}.r1{inset:8%;border-width:2px;border-left-color:transparent;border-bottom-color:#48eaff28;animation:spin 16s linear infinite}.r2{inset:23%;border-style:dashed;animation:spin 10s linear reverse infinite}.r3{inset:37%;border-width:2px;animation:pulseRing 2.4s ease-in-out infinite}.tick-ring{position:absolute;inset:13%;border-radius:50%;background:repeating-conic-gradient(#5cecff 0 1deg,transparent 1deg 6deg);mask:radial-gradient(circle,transparent 0 43%,#000 44% 48%,transparent 49%);opacity:.58;animation:spin 44s linear infinite}.core-letter{width:92px;height:92px;border-radius:50%;display:grid;place-items:center;font:300 46px/1 monospace;color:#efffff;background:radial-gradient(circle,#c9fcff 0 5%,#54eaff 7%,#083f4b 18%,#031018 55%,transparent 70%);border:1px solid #a9fbff;box-shadow:0 0 18px #fff,0 0 52px #00eaff,0 0 120px #00d9ff}.scan-line{position:absolute;width:46%;height:1px;background:linear-gradient(90deg,transparent,#7af5ff,transparent);transform-origin:100% 50%;left:4%;top:50%;animation:spin 4.5s linear infinite}.core-caption{position:absolute;bottom:12%;font:9px monospace;letter-spacing:.26em;color:#58b8c5}
+        .jarvis{width:min(34vw,430px);height:min(34vw,430px);min-width:320px;min-height:320px;position:relative;border-radius:50%;display:grid;place-items:center;margin:auto;filter:drop-shadow(0 0 34px #00d9ff30)}.ring{position:absolute;border:1px solid #48eaff;border-radius:50%;box-shadow:0 0 18px #00d9ff38,inset 0 0 18px #00d9ff20}.r0{inset:0;border-style:dotted;opacity:.42;animation:spin 31s linear reverse infinite}.r1{inset:8%;border-width:2px;border-left-color:transparent;border-bottom-color:#48eaff28;animation:spin 16s linear infinite}.r2{inset:23%;border-style:dashed;animation:spin 10s linear reverse infinite}.r3{inset:37%;border-width:2px;animation:pulseRing 2.4s ease-in-out infinite}.tick-ring{position:absolute;inset:13%;border-radius:50%;background:repeating-conic-gradient(#5cecff 0 1deg,transparent 1deg 6deg);mask:radial-gradient(circle,transparent 0 43%,#000 44% 48%,transparent 49%);opacity:.58;animation:spin 44s linear infinite}.thought-field{position:absolute;inset:27%;border-radius:50%;display:grid;place-items:center;filter:drop-shadow(0 0 25px #00eaff66)}.thought-brain{width:74px;height:74px;border-radius:48% 52% 44% 56%/55% 43% 57% 45%;background:radial-gradient(circle at 38% 35%,#efffff 0 4%,#80f8ff 8%,#0a7487 18%,#05333e 42%,#021014 72%);box-shadow:0 0 18px #fff,0 0 46px #00eaff,0 0 110px #00d9ff;animation:brainPulse 2.2s ease-in-out infinite;z-index:4}.thought-brain:before,.thought-brain:after{content:"";position:absolute;width:38px;height:22px;border:1px solid #a8fbff88;border-radius:50%;filter:blur(.2px)}.thought-brain:before{transform:translate(-22px,-7px) rotate(28deg)}.thought-brain:after{transform:translate(15px,12px) rotate(-24deg)}.thought-wave{position:absolute;border:1px solid #5beeff88;border-radius:50%;animation:thoughtWave 3.2s ease-out infinite}.w1{inset:5%;animation-delay:0s}.w2{inset:-10%;animation-delay:.8s}.w3{inset:-24%;animation-delay:1.6s}.thought-node{position:absolute;width:7px;height:7px;border-radius:50%;background:#b8fdff;box-shadow:0 0 10px #54eaff,0 0 24px #00dfff}.n1{left:8%;top:36%;animation:nodeOrbit 5s linear infinite}.n2{right:3%;top:25%;animation:nodeOrbit 7s linear reverse infinite}.n3{right:12%;bottom:10%;animation:nodeOrbit 6s linear infinite}.n4{left:18%;bottom:2%;animation:nodeOrbit 8s linear reverse infinite}.thought-label{position:absolute;bottom:11%;font:400 11px monospace;letter-spacing:.22em;color:#c9fbff;text-shadow:0 0 12px #00dfff}.thought-detail{position:absolute;top:92%;width:115%;text-align:center;font:9px/1.4 monospace;color:#66aeb9;letter-spacing:.04em}.thought-core.fast .thought-brain{animation-duration:1.15s}.thought-core.fast .ring{animation-duration:5s}.thought-core.alert .thought-brain{animation-duration:.9s;box-shadow:0 0 18px #fff,0 0 50px #8af7ff,0 0 130px #00eaff}.thought-core.alert .thought-wave{animation-duration:1.4s}.thought-core.slow .thought-brain{animation-duration:3.8s}.thought-core.slow .thought-wave{animation-duration:5.2s}
+        @keyframes brainPulse{0%,100%{transform:scale(.92);filter:brightness(.85)}50%{transform:scale(1.08);filter:brightness(1.35)}}@keyframes thoughtWave{0%{transform:scale(.55);opacity:.95}70%{opacity:.25}100%{transform:scale(1.35);opacity:0}}@keyframes nodeOrbit{0%{transform:rotate(0deg) translateX(8px)}50%{transform:rotate(180deg) translateX(-8px)}100%{transform:rotate(360deg) translateX(8px)}}
+        .scan-line{position:absolute;width:46%;height:1px;background:linear-gradient(90deg,transparent,#7af5ff,transparent);transform-origin:100% 50%;left:4%;top:50%;animation:spin 4.5s linear infinite}.core-caption{position:absolute;bottom:12%;font:9px monospace;letter-spacing:.26em;color:#58b8c5}
         .telemetry{position:relative;z-index:2;padding:18px 20px;background:linear-gradient(90deg,#031018b5,transparent 94%);clip-path:polygon(0 0,92% 0,100% 14%,100% 86%,92% 100%,0 100%)}.telemetry.right{background:linear-gradient(270deg,#031018b5,transparent 94%);text-align:right;clip-path:polygon(8% 0,100% 0,100% 100%,8% 100%,0 86%,0 14%)}.hud-label{font:9px monospace;letter-spacing:.26em;color:#3fa8b8}.hud-value{font:300 27px monospace;letter-spacing:.08em;color:#c9fbff;margin:7px 0;text-shadow:0 0 14px #55eaff55}.hud-line{height:1px;background:linear-gradient(90deg,#48eaff,transparent);margin:10px 0 14px}.right .hud-line{background:linear-gradient(270deg,#48eaff,transparent)}.tele-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #37dff216;font:10px monospace;color:#559aa7}.right .tele-row{flex-direction:row-reverse}.tele-row b{font-weight:400;color:#d2fbff}
         .identity-strip{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;padding:14px 4px 20px}.identity-strip span{display:block;font:9px monospace;letter-spacing:.2em;color:#4eb5c4}.identity-strip strong{display:block;font:300 clamp(36px,5vw,70px)/1 monospace;letter-spacing:.18em;color:#eaffff;text-shadow:0 0 18px #4eeaff55}.live-chip{font:10px monospace;color:#6ce6c5}.live-chip i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#62ffd2;box-shadow:0 0 12px #62ffd2;margin-right:7px}
         .command-deck{position:relative;margin:4px 0 24px;padding:14px 18px;border-top:1px solid #3ce8ff3d;border-bottom:1px solid #3ce8ff20;background:linear-gradient(90deg,transparent,#04171ea8 10%,#04171ea8 90%,transparent)}.command-head{display:flex;justify-content:space-between;gap:20px;margin-bottom:9px}.command-head span{font:9px monospace;letter-spacing:.22em;color:#4faebe}.command-head b{font:400 12px monospace;letter-spacing:.17em;color:#8af1ff}.command-input{display:grid;grid-template-columns:1fr auto auto;gap:8px}.command-input textarea{min-height:62px;background:#01090dbb;border:1px solid #2adcf044;color:#e5fdff;padding:12px;resize:vertical}
