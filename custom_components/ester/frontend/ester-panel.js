@@ -19,7 +19,12 @@ class EsterPanel extends HTMLElement {
 
   set hass(value) { this._hass = value; if (!this.shadowRoot?.querySelector(".shell")) this.render(); else this.refreshDataOnly(); }
   set panel(value) { this._panel = value; }
-  connectedCallback() { this.render(); }\n\n  refreshDataOnly() {\n    // Home Assistant updates `hass` very frequently. Rebuilding the whole Shadow DOM here\n    // resets native horizontal scrolling on iPhone, making the tab bar jump back to the left.\n    // Keep the current DOM/scroll position; explicit user actions still call render().\n    if (this._tab === "overview") this.startNeuralCore();\n  }
+  connectedCallback() { this.render(); }
+
+  refreshDataOnly() {
+    // Preserve scroll position and unsent answers during background updates.
+    if (this._tab === "overview") this.startNeuralCore();
+  }
   disconnectedCallback() { this.stopNeuralCore(); }
 
   state(id) { return this._hass?.states?.[id]; }
@@ -478,17 +483,16 @@ class EsterPanel extends HTMLElement {
       <article class="question-panel">
         <div class="question-index">Q${String(index+1).padStart(2,"0")}</div>
         <div class="question-main">
-          <div class="eyebrow">${this.esc((q.category || "input").toUpperCase())} · CONFIDENCE ${this.pct(q.confidence)} · RISCHIO ${this.esc((q.risk || "—").toUpperCase())}</div>
           <h2>${this.esc(title)}</h2>
           <div class="question-prompt">${this.esc(prompt)}</div>
           <div class="question-context">
-            <div><span>COSA HO OSSERVATO</span><p>${this.esc(observed)}</p></div>
             <div><span>PERCHÉ TE LO CHIEDO</span><p>${this.esc(why)}</p></div>
           </div>
+          <details><summary>Dettagli della domanda</summary><p>${this.esc(observed)}</p><p>${this.esc(q.prompt || "")}</p></details>
           <div class="hint">${this.esc(hint)}</div>
           ${quick.length ? '<div class="quick-row">'+quick.map(x=>`<button class="quick" data-quick-q="${this.esc(q.question_id)}" data-quick-answer="${this.esc(x)}">${this.esc(x)}</button>`).join("")+'</div>' : ''}
           <div class="answer-console">
-            <input id="answer-${this.esc(q.question_id)}" placeholder="Rispondi qui oppure usa il microfono…" />
+            <input id="answer-${this.esc(q.question_id)}" aria-label="La tua risposta" placeholder="Scrivi come parleresti a una persona…" />
             <button class="mic" data-voice-q="${this.esc(q.question_id)}" title="Rispondi a voce">◉ PARLA</button>
             <button class="send" data-answer="${this.esc(q.question_id)}">INVIA</button>
           </div>

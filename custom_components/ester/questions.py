@@ -24,11 +24,19 @@ def _friendly_question(decision: dict, prompt: str) -> dict:
     }
 
     p = prompt.lower()
-    if category == "climate" and ("temperatura" in p or "comfort" in p):
+    if category == "climate" and "sensore" in p:
+        base.update({
+            "display_title": f"Termometro di {area_label}",
+            "display_prompt": f"Hai un sensore che misura la temperatura della stanza {area_label}?",
+            "why_asking": "Mi serve la temperatura della stanza, non quella impostata sul riscaldamento.",
+            "answer_hint": "Scrivi il nome con cui lo riconosci in Home Assistant. Se non sai quale sia, scegli Non lo so.",
+            "quick_answers": ["Non ho un sensore in questa stanza"],
+        })
+    elif category == "climate" and ("comfort" in p or "temperatura desideri" in p):
         base.update({
             "display_title": f"Comfort di {area_label}",
             "display_prompt": f"Che temperatura vuoi normalmente in {area_label} quando la stanza è usata?",
-            "why_asking": "Senza il tuo target non posso capire se conviene riscaldare, raffrescare o aspettare.",
+            "why_asking": "Mi serve sapere a quale temperatura stai bene per valutare il riscaldamento.",
             "answer_hint": "Esempio: «21 gradi» oppure «20,5 °C».",
             "quick_answers": ["19 °C", "20 °C", "21 °C", "22 °C"],
         })
@@ -56,38 +64,39 @@ def _friendly_question(decision: dict, prompt: str) -> dict:
             "answer_hint": "Esempio: «Sì» oppure «No, può esserci qualcuno fermo».",
             "quick_answers": ["Sì", "No"],
         })
-    elif category == "security":
+    elif category == "security" and "antifurto" in p:
         base.update({
             "display_title": "Logica antifurto",
-            "display_prompt": "Questa proposta di armamento/disarmo corrisponde a come vuoi usare normalmente l'antifurto?",
+            "display_prompt": "Quando vuoi che l'antifurto sia attivo e quando spento?",
             "why_asking": "L'antifurto è un dominio ad alto rischio e non voglio imparare una regola sbagliata.",
             "answer_hint": "Puoi dire cosa deve succedere, ad esempio: «Di giorno, se siamo in casa, deve essere disarmato».",
-            "quick_answers": ["Sì, è corretta", "No, va cambiata"],
+            "quick_answers": [],
         })
     elif category == "hot_water":
         base.update({
-            "display_title": "Acqua calda sanitaria",
-            "display_prompt": "Qual è il target normale dell'acqua calda che vuoi usare?",
-            "why_asking": "Mi serve per confrontare disponibilità ACS, tempi di recupero, FV e costo senza toccare i cicli sanitari.",
-            "answer_hint": "Esempio: «52 gradi».",
-            "quick_answers": ["48 °C", "50 °C", "52 °C", "55 °C"],
+            "display_title": "Temperatura del boiler",
+            "display_prompt": "A quanti gradi tieni normalmente impostato il boiler?",
+            "why_asking": "Mi serve conoscere la tua impostazione abituale per studiare i consumi dell'acqua calda.",
+            "answer_hint": "Leggi la temperatura impostata sul boiler, non quella dell'acqua in questo momento. Non modificare le impostazioni per rispondere.",
+            "quick_answers": [],
         })
     elif category == "energy":
         base.update({
             "display_title": "Configurazione energia",
-            "display_prompt": prompt,
-            "why_asking": "Il planner energetico non deve indovinare quali contatori rappresentano FV, casa, rete, batteria o fasi.",
-            "answer_hint": "Puoi indicarmi l'entità o spiegarmi a cosa corrisponde.",
+            "display_prompt": "Come si chiamano in Home Assistant i valori dei pannelli solari, del consumo di casa e della batteria?",
+            "why_asking": "Voglio distinguere l'energia prodotta da quella consumata, senza confondere i contatori.",
+            "answer_hint": "Puoi descrivere anche un solo valore, per esempio: «Produzione solare indica i pannelli». La risposta sarà una nota da verificare, non un collegamento automatico.",
             "quick_answers": [],
         })
     elif category == "irrigation":
         base.update({
             "display_title": f"Irrigazione di {area_label}",
-            "display_prompt": prompt,
+            "display_prompt": ("Hai un sensore che misura quanto è umido il terreno o se piove?" if "sensori" in p else "Ci sono regole o limiti da rispettare quando annaffi questa zona?"),
             "why_asking": "Voglio evitare di irrigare basandomi su una soglia non adatta alla zona.",
-            "answer_hint": "Puoi indicare la soglia o descrivere quando vuoi irrigare.",
+            "answer_hint": "Descrivi quello che sai con parole tue. Non serve inventare numeri o percentuali.",
             "quick_answers": [],
         })
+    base["quick_answers"] = [*base["quick_answers"], "Non lo so"]
     return base
 
 def question_from_decision(decision: dict, now: datetime) -> dict | None:
@@ -177,7 +186,10 @@ def interpret_answer(question: dict, answer: str) -> dict:
     area = question.get("area_id")
     category = question.get("category")
 
-    if category == "climate" and area:
+    if lower.rstrip(".! ") == "non lo so":
+        return {"kind": "deferred", "summary": "Va bene: te lo richiederò tra qualche giorno. Non ho imparato nessuna preferenza da questa risposta."}
+
+    if category == "climate" and area and "sensore" not in question.get("prompt", "").lower():
         temp = _temperature(text)
         if temp is not None and any(token in lower for token in ("voglio", "prefer", "comfort", "tieni", "tenere", "gradi", "°")):
             return {
@@ -214,10 +226,12 @@ def apply_answer(data: dict, question_id: str, answer: str, now: datetime) -> di
     if question.get("status") == "answered":
         raise ValueError("already_answered")
     interpretation = interpret_answer(question, answer)
-    question["status"] = "answered"
+    question["status"] = "deferred" if interpretation["kind"] == "deferred" else "answered"
     question["answer"] = answer.strip()
     question["interpretation"] = interpretation
     question["updated_at"] = now.isoformat()
+    if interpretation["kind"] == "deferred":
+        return interpretation
     if interpretation["kind"] == "preference":
         data.setdefault("preferences", {})[interpretation["key"]] = interpretation["value"]
     else:
