@@ -79,7 +79,10 @@ async def run_historical_replay(hass, coordinator, *, days: int = 7, step_minute
     local_tz = __import__("zoneinfo").ZoneInfo(hass.config.time_zone)
     data = coordinator.storage.data
 
-    while checkpoint <= now and checkpoints < 1500:
+    # Bound by the requested interval rather than a fixed cap: 56 days at a
+    # 30-minute step needs ~2689 checkpoints.
+    max_checkpoints = int((now - start).total_seconds() // (step_minutes * 60)) + 2
+    while checkpoint <= now and checkpoints < max_checkpoints:
         historical_profiles = []
         for base in profiles:
             seq = series.get(base.entity_id, [])
