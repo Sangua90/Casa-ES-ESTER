@@ -222,6 +222,7 @@ interpret_message:
       selector:
         text:
           multiline: true
+          type: text
     preview:
       name: "Anteprima"
       selector:
