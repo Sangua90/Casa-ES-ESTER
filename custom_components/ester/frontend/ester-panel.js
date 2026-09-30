@@ -6,6 +6,7 @@ class EsterPanel extends HTMLElement {
     this._busy = false;
     this._tab = "overview";
     this._decisionCategory = "all";
+    this._advanced = false;
     this._notice = "";
   }
 
@@ -287,6 +288,35 @@ class EsterPanel extends HTMLElement {
     await this.call("ester","remove_flexible_load",{load_id});
   }
 
+  confidenceLabel(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "ANCORA DA VALUTARE";
+    if (n >= .9) return "MOLTO SICURA";
+    if (n >= .8) return "SICURA";
+    if (n >= .65) return "ABBASTANZA SICURA";
+    if (n >= .5) return "INCERTA";
+    return "POCO SICURA";
+  }
+
+  confidenceMeaning(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "Non ho ancora abbastanza dati.";
+    if (n >= .9) return "Ho molti dati coerenti per questa scelta.";
+    if (n >= .8) return "I dati disponibili supportano bene questa scelta.";
+    if (n >= .65) return "La scelta è plausibile, ma voglio ancora verificarla.";
+    if (n >= .5) return "Ci sono ancora elementi che possono cambiare la decisione.";
+    return "Non userei ancora questa decisione in automatico.";
+  }
+
+  migrationMeaning(status) {
+    const s = String(status || "observe");
+    if (s === "candidate_for_manual_migration") return "QUASI PRONTA DA SOSTITUIRE";
+    if (s === "validate") return "DA CONTROLLARE ANCORA";
+    if (s === "needs_validation") return "NON ANCORA AFFIDABILE";
+    if (s === "needs_data") return "MANCANO DATI";
+    return "CONTINUA A OSSERVARE";
+  }
+
   categoryLabel(category) {
     const labels = {
       energy:"ENERGIA", climate:"CLIMA", hot_water:"ACQUA CALDA", ventilation:"VENTILAZIONE",
@@ -322,7 +352,7 @@ class EsterPanel extends HTMLElement {
     let list = (items || this.realDecisions()).slice().reverse();
     if (!items && this._decisionCategory !== "all") list = list.filter(x=>x.category===this._decisionCategory);
     list = list.slice(0, 100);
-    if (!list.length) return '<div class="empty">Non ci sono ancora vere decisioni Shadow da mostrare. Le richieste di configurazione sono nella sezione DATI MANCANTI.</div>';
+    if (!list.length) return '<div class="empty">Non ci sono ancora decisioni vere da mostrare.</div>';
     return list.map(d => {
       const objective = d.evidence?.objective_score?.score;
       const readiness = d.evidence?.objective_score?.execution_readiness;
@@ -330,19 +360,26 @@ class EsterPanel extends HTMLElement {
       <article class="decision true-decision">
         <div class="decision-head">
           <div>
-            <div class="eyebrow">${this.esc((d.category || "decision").toUpperCase())} · SHADOW</div>
+            <div class="eyebrow">${this.esc(this.categoryLabel(d.category))}</div>
             <h3>${this.esc(d.title)}</h3>
           </div>
-          <div class="confidence-block"><span>SICUREZZA</span><b>${this.pct(d.confidence)}</b></div>
+          <div class="simple-confidence">
+            <b>${this.esc(this.confidenceLabel(d.confidence))}</b>
+            <span>${this.pct(d.confidence)}</span>
+          </div>
         </div>
-        <div class="meter"><span style="width:${Math.max(0, Math.min(100, Number(d.confidence || 0) * 100))}%"></span></div>
-        <div class="decision-section"><span>COSA AVREBBE FATTO</span><strong>${this.esc(d.proposed_action)}</strong></div>
+        <div class="decision-section primary"><span>E.S.T.E.R. AVREBBE FATTO</span><strong>${this.esc(d.proposed_action)}</strong></div>
         <div class="decision-section"><span>PERCHÉ</span><p>${this.esc(d.reasoning)}</p></div>
-        <div class="meta">
-          <span>RISCHIO ${this.esc((d.risk || "—").toUpperCase())}</span>
-          <span>PRIORITÀ ${objective == null ? "—" : this.pct(objective)}</span>
-          <span>READINESS ${readiness == null ? "—" : this.pct(readiness)}</span>
-        </div>
+        <div class="plain-explain">${this.esc(this.confidenceMeaning(d.confidence))}</div>
+        ${this._advanced ? `
+          <details class="tech-details" open>
+            <summary>DETTAGLI TECNICI</summary>
+            <div class="meta">
+              <span>RISCHIO ${this.esc((d.risk || "—").toUpperCase())}</span>
+              <span>PRIORITÀ ${objective == null ? "—" : this.pct(objective)}</span>
+              <span>READINESS ${readiness == null ? "—" : this.pct(readiness)}</span>
+            </div>
+          </details>` : ''}
       </article>`;
     }).join("");
   }
@@ -433,90 +470,81 @@ class EsterPanel extends HTMLElement {
 
   energyCard() {
     const d = this.latest().slice().reverse().find(x => x.category === "energy");
-    if (!d) return '<div class="empty">Il planner energia non ha ancora una decisione completa.</div>';
+    if (!d) return '<div class="empty">E.S.T.E.R. sta ancora raccogliendo i dati necessari per il piano energia.</div>';
     const p = d.evidence?.energy_plan || {};
     const managed = d.evidence?.managed_load_plan || [];
+    const surplus = Number(p.instant_surplus_w);
+    const summary = Number.isFinite(surplus)
+      ? (surplus > 300 ? "In questo momento hai energia disponibile oltre al consumo della casa." :
+         surplus < 50 ? "In questo momento non c'è un surplus FV significativo." :
+         "Il bilancio energetico è quasi in equilibrio.")
+      : "Sto ancora completando il bilancio energetico.";
     return `
       <article class="energy-core hud-panel">
         <div class="energy-reactor"><div class="energy-ring er1"></div><div class="energy-ring er2"></div><div class="energy-core-dot"></div><span>${this.esc(p.battery_soc ?? "—")}%</span></div>
         <div class="energy-data">
-          <div class="eyebrow">LOCAL ENERGY CORE</div>
-          <h2>${this.esc((p.strategy || "learning").replaceAll("_"," ").toUpperCase())}</h2>
-          <div class="metrics">
-            <div><b>${this.esc(p.pv_w ?? "—")}</b><span>FV W</span></div>
-            <div><b>${this.esc(p.load_w ?? "—")}</b><span>CASA W</span></div>
-            <div><b>${this.esc(p.battery_soc ?? "—")}%</b><span>SOC</span></div>
-            <div><b>${this.esc(p.instant_surplus_w ?? "—")}</b><span>SURPLUS W</span></div>
+          <div class="eyebrow">SITUAZIONE ENERGIA</div>
+          <h2>${this.esc(summary)}</h2>
+          <div class="metrics human-metrics">
+            <div><b>${this.esc(p.pv_w ?? "—")} W</b><span>STA PRODUCENDO IL FV</span></div>
+            <div><b>${this.esc(p.load_w ?? "—")} W</b><span>STA USANDO LA CASA</span></div>
+            <div><b>${this.esc(p.battery_soc ?? "—")}%</b><span>BATTERIA DISPONIBILE</span></div>
+            <div><b>${this.esc(p.instant_surplus_w ?? "—")} W</b><span>ENERGIA IN PIÙ</span></div>
           </div>
-          <p>${this.esc(d.reasoning)}</p>
-          <div class="meta"><span>CARICHI GESTITI ${managed.length}</span><span>COMANDI REALI 0</span></div>
+          <div class="decision-section primary"><span>E.S.T.E.R. AVREBBE FATTO</span><strong>${this.esc(d.proposed_action)}</strong></div>
+          <div class="decision-section"><span>PERCHÉ</span><p>${this.esc(d.reasoning)}</p></div>
+          ${this._advanced ? `<details class="tech-details" open><summary>DETTAGLI TECNICI</summary><pre>${this.esc(JSON.stringify({energy_plan:p,managed_loads:managed},null,2)).slice(0,4000)}</pre></details>` : ''}
         </div>
       </article>
-      ${managed.length ? '<h2 class="section-title">PIANO CARICHI</h2><section class="grid">' + managed.slice(0,20).map(x=>`
+      ${managed.length ? '<h2 class="section-title">CARICHI CHE E.S.T.E.R. STA VALUTANDO</h2><section class="grid">' + managed.slice(0,20).map(x=>`
         <article class="decision">
-          <div class="eyebrow">${this.esc(x.phase || "unknown")} · PRIORITÀ ${this.esc(x.priority)}</div>
-          <h3>${this.esc(x.name)}</h3>
-          <div class="proposal">${this.esc((x.shadow_action || "").replaceAll("_"," ").toUpperCase())}</div>
+          <div class="eyebrow">${this.esc(x.name)}</div>
+          <div class="decision-section primary"><span>COSA FAREBBE</span><strong>${this.esc((x.shadow_action || "").replaceAll("_"," "))}</strong></div>
           <p>${this.esc(x.shadow_reason)}</p>
-          <div class="meta"><span>${this.esc(x.power_w)} W</span><span>${this.esc(x.estimated_energy_kwh)} kWh</span></div>
+          ${this._advanced ? '<div class="meta"><span>'+this.esc(x.power_w)+' W</span><span>'+this.esc(x.estimated_energy_kwh)+' kWh</span><span>'+this.esc(x.phase||"")+'</span></div>' : ''}
         </article>`).join("") + '</section>' : ''}
     `;
   }
 
   migrationCards() {
     const items = Object.entries(this.migration());
-    if (!items.length) return '<div class="empty">Nessuna automazione legacy classificata.</div>';
-    return items.map(([name,x], index) => {
-      const feedback = x.empirical_feedback_score;
-      return `
+    if (!items.length) return '<div class="empty">Non ho ancora automazioni legacy da confrontare.</div>';
+    return items.map(([name,x]) => `
       <article class="migration hud-panel">
-        <div class="panel-orbit">
-          <div class="panel-ring"></div>
-          <b>${feedback == null ? this.esc(x.shadow_decisions_checked ?? 0) : this.pct(feedback)}</b>
-          <span>${feedback == null ? "TEST" : "FEEDBACK"}</span>
-        </div>
+        <div class="panel-orbit"><div class="panel-ring"></div><b>${this.esc(x.shadow_decisions_checked ?? 0)}</b><span>PROVE</span></div>
         <div class="panel-body">
-          <div class="eyebrow">MIGRATION / ${String(index+1).padStart(2,"0")}</div>
-          <div class="decision-head">
-            <h3>${this.esc(this.categoryLabel(name))}</h3>
-            <span class="status">${this.esc((x.status || "observe").replaceAll("_"," ").toUpperCase())}</span>
-          </div>
-          <div class="tele-list">
-            <div><span>AUTOMAZIONI LEGACY</span><b>${this.esc(x.legacy_automations ?? 0)}</b></div>
-            <div><span>DECISIONI SHADOW</span><b>${this.esc(x.shadow_decisions_checked ?? 0)}</b></div>
-            <div><span>DOMANDE APERTE</span><b>${this.esc(x.open_questions ?? 0)}</b></div>
-          </div>
-          <div class="meta"><span>DISATTIVAZIONE AUTOMATICA</span><span>NO</span></div>
+          <div class="eyebrow">${this.esc(this.categoryLabel(name))}</div>
+          <h3>${this.esc(this.migrationMeaning(x.status))}</h3>
+          <p>${x.status==="candidate_for_manual_migration"
+              ? "E.S.T.E.R. ha già abbastanza confronti per valutare una sostituzione manuale."
+              : "Per ora terrei attive le automazioni esistenti mentre E.S.T.E.R. continua a confrontarsi con loro."}</p>
+          <div class="plain-explain">Automazioni attuali: ${this.esc(x.legacy_automations ?? 0)} · Domande ancora aperte: ${this.esc(x.open_questions ?? 0)}</div>
+          ${this._advanced ? `<details class="tech-details" open><summary>DETTAGLI TECNICI</summary><pre>${this.esc(JSON.stringify(x,null,2))}</pre></details>` : ''}
         </div>
-      </article>`;
-    }).join("");
+      </article>`).join("");
   }
 
   learningCards() {
     const s = this.summary();
     const groups = [
-      ["THERMAL","MODEL / 01",s.thermal_models||{},"Risposta termica delle stanze"],
-      ["VENTILATION","MODEL / 02",s.ventilation_models||{},"Efficacia reale della ventilazione"],
-      ["HOT WATER","MODEL / 03",s.hot_water_models||{},"Recupero e dispersione ACS"],
-      ["OCCUPANCY","MODEL / 04",s.occupancy_models||{},"Probabilità di utilizzo degli ambienti"]
+      ["CLIMA STANZE",s.thermal_models||{},"quanto velocemente si scaldano o raffreddano le stanze"],
+      ["VENTILAZIONE",s.ventilation_models||{},"quanto serve davvero accendere le ventole"],
+      ["ACQUA CALDA",s.hot_water_models||{},"come cala e recupera la temperatura del boiler"],
+      ["PRESENZA",s.occupancy_models||{},"quando è probabile che gli ambienti vengano usati"]
     ];
-    return groups.map(([label,code,data,desc]) => {
+    return groups.map(([label,data,desc]) => {
       const vals = Object.values(data).map(x=>Number(x?.confidence)).filter(Number.isFinite);
       const avg = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+      const enough = avg != null && avg >= .65;
       return `
         <article class="model hud-panel">
-          <div class="panel-orbit">
-            <div class="panel-ring"></div>
-            <b>${Object.keys(data).length}</b>
-            <span>MODELLI</span>
-          </div>
+          <div class="panel-orbit"><div class="panel-ring"></div><b>${enough?"OK":"…"}</b><span>${enough?"DATI SUFFICIENTI":"STO IMPARANDO"}</span></div>
           <div class="panel-body">
-            <div class="eyebrow">${code}</div>
-            <h3>${label}</h3>
-            <p>${desc}</p>
-            <div class="signal-line"><span style="width:${avg==null?0:Math.round(avg*100)}%"></span></div>
-            <div class="meta"><span>CONFIDENCE MEDIA</span><span>${avg==null?"—":this.pct(avg)}</span></div>
-            <details><summary>DETTAGLI TECNICI</summary><pre>${this.esc(JSON.stringify(data,null,2)).slice(0,2600)}</pre></details>
+            <div class="eyebrow">${this.esc(label)}</div>
+            <h3>${enough ? "Ho già una base utile" : "Mi servono ancora osservazioni"}</h3>
+            <p>Sto imparando ${this.esc(desc)}.</p>
+            <div class="plain-explain">${avg==null?"Non ho ancora abbastanza esempi.":this.confidenceMeaning(avg)}</div>
+            ${this._advanced ? `<details class="tech-details" open><summary>DETTAGLI TECNICI</summary><pre>${this.esc(JSON.stringify(data,null,2)).slice(0,3000)}</pre></details>` : ''}
           </div>
         </article>`;
     }).join("");
@@ -529,69 +557,43 @@ class EsterPanel extends HTMLElement {
     const replay = s.last_replay || {};
     const scenario = s.last_scenario || {};
     const anomalies = s.anomalies || [];
+    const ready = !!h.overall_ready_for_executor;
     return `
-      ${this.viewHeader("VALIDATION / 06","VALIDAZIONE","Replay storico, KPI, simulazioni e salute pre-autonomia.", h.feedback_quality==null?"—":this.pct(h.feedback_quality),"QUALITY")}
-      <h2 class="section-title">AUTONOMY HEALTH</h2>
-      <article class="health ${h.overall_ready_for_executor ? "ok" : "warn"}">
-        <div class="decision-head">
-          <div>
-            <div class="eyebrow">PRE-AUTONOMY GATE</div>
-            <h2>${h.overall_ready_for_executor ? "READY FOR FINAL VALIDATION" : "SHADOW STILL REQUIRED"}</h2>
-          </div>
-          <div class="confidence">${h.feedback_quality == null ? "—" : this.pct(h.feedback_quality)}</div>
-        </div>
-        <p>Blocchi: ${this.esc((h.blocking_reasons || []).join(", ") || "nessuno")}</p>
-        <div class="meta"><span>EXECUTOR PRESENTE</span><span>NO</span></div>
+      ${this.viewHeader("VALIDATION / 06","VALIDAZIONE","Qui vedi in parole semplici se E.S.T.E.R. ha già imparato abbastanza.", ready?"QUASI PRONTA":"NON ANCORA","STATO")}
+      <article class="health ${ready?"ok":"warn"}">
+        <div class="decision-section primary"><span>POSSO TOGLIERE SHADOW?</span><strong>${ready?"I DATI SONO ABBASTANZA SOLIDI PER LA VALIDAZIONE FINALE":"NO, CONTINUEREI ANCORA IN SHADOW"}</strong></div>
+        <p>${ready
+            ? "I domini principali hanno dati e feedback sufficienti. L'esecuzione reale comunque non è ancora attiva."
+            : "Ci sono ancora aree che devono essere osservate o confermate prima di affidare azioni reali a E.S.T.E.R."}</p>
+        <div class="plain-explain">${(h.blocking_reasons||[]).length ? "Da completare: "+this.esc((h.blocking_reasons||[]).map(x=>this.categoryLabel(x)).join(", ")) : "Nessun blocco principale rilevato."}</div>
       </article>
 
-      <h2 class="section-title">KPI SHADOW</h2>
-      <section class="stats">
-        <div><b>${this.esc(k.decisions ?? 0)}</b><span>DECISIONI</span></div>
-        <div><b>${k.avg_confidence == null ? "—" : this.pct(k.avg_confidence)}</b><span>CONFIDENCE MEDIA</span></div>
-        <div><b>${k.feedback?.quality_score == null ? "—" : this.pct(k.feedback.quality_score)}</b><span>QUALITÀ FEEDBACK</span></div>
-        <div><b>${this.esc(k.open_questions ?? 0)}</b><span>DOMANDE APERTE</span></div>
+      <h2 class="section-title">COME STA ANDANDO</h2>
+      <section class="simple-status-grid">
+        <div><b>${this.esc(k.decisions ?? 0)}</b><span>decisioni osservate</span></div>
+        <div><b>${k.avg_confidence == null ? "—" : this.pct(k.avg_confidence)}</b><span>sicurezza media</span></div>
+        <div><b>${k.feedback?.quality_score == null ? "—" : this.pct(k.feedback.quality_score)}</b><span>feedback positivi</span></div>
+        <div><b>${this.esc(k.open_questions ?? 0)}</b><span>domande ancora aperte</span></div>
       </section>
 
-      <h2 class="section-title">REPLAY STORICO</h2>
+      <h2 class="section-title">PROVA SULLO STORICO</h2>
       <article class="control">
-        <p>Rigioca Recorder con il motore Shadow attuale. Non modifica dispositivi né storico.</p>
-        <div class="button-row">
-          <button data-replay="7">REPLAY 7 GIORNI</button>
-          <button data-replay="30">REPLAY 30 GIORNI</button><button data-replay="56">REPLAY 8 SETTIMANE</button>
-        </div>
-        <div class="metrics compact">
-          <div><b>${this.esc(replay.checkpoints ?? "—")}</b><span>CHECKPOINT</span></div>
-          <div><b>${this.esc(replay.decisions ?? "—")}</b><span>DECISIONI</span></div>
-          <div><b>${replay.avg_checkpoint_confidence == null ? "—" : this.pct(replay.avg_checkpoint_confidence)}</b><span>CONFIDENCE</span></div>
-          <div><b>${this.esc(replay.needs_input ?? "—")}</b><span>INPUT NECESSARI</span></div>
-        </div>
+        <p>Puoi farle rileggere il passato per vedere cosa avrebbe deciso, senza aspettare settimane.</p>
+        <div class="button-row"><button data-replay="7">ULTIMA SETTIMANA</button><button data-replay="30">ULTIMO MESE</button><button data-replay="56">ULTIME 8 SETTIMANE</button></div>
+        ${replay.checkpoints ? `<div class="plain-explain">Ultima prova: ${this.esc(replay.decisions)} decisioni simulate · sicurezza media ${this.pct(replay.avg_checkpoint_confidence)} · ${this.esc(replay.needs_input)} casi in cui avrebbe chiesto aiuto.</div>` : ''}
+        ${this._advanced ? `<details class="tech-details"><summary>DETTAGLI TECNICI REPLAY</summary><pre>${this.esc(JSON.stringify(replay,null,2)).slice(0,3500)}</pre></details>` : ''}
       </article>
 
-      <h2 class="section-title">WHAT-IF</h2>
+      <h2 class="section-title">SIMULA UNA GIORNATA DIVERSA</h2>
       <article class="control">
-        <div class="form-grid">
-          <label>Delta comfort °C<input id="scenario-comfort" type="number" step="0.5" value="0"></label>
-          <label>Moltiplicatore costo energia<input id="scenario-price" type="number" step="0.1" value="1"></label>
-        </div>
-        <div class="button-row">
-          <button data-scenario="normal">NORMALE</button>
-          <button data-scenario="vacation">VACANZA</button>
-          <button data-scenario="guests">OSPITI</button>
-          <button data-scenario="illness">MALATTIA</button>
-          <button data-scenario="work_from_home">CASA/LAVORO</button>
-        </div>
-        <p>Ultimo scenario: ${this.esc(scenario.mode || "—")} · ${this.esc(scenario.decision_count ?? "—")} decisioni</p>
+        <p>Serve per vedere come cambierebbero le decisioni se foste in vacanza, aveste ospiti o cambiasse il costo dell'energia.</p>
+        <div class="button-row"><button data-scenario="normal">GIORNATA NORMALE</button><button data-scenario="vacation">VACANZA</button><button data-scenario="guests">OSPITI</button><button data-scenario="illness">MALATTIA</button><button data-scenario="work_from_home">CASA/LAVORO</button></div>
+        ${scenario.mode ? `<div class="plain-explain">Ultima simulazione: ${this.esc(scenario.mode)} · ${this.esc(scenario.decision_count)} decisioni previste.</div>` : ''}
       </article>
 
-      <h2 class="section-title">ANOMALIE</h2>
-      <section class="grid">
-        ${anomalies.length ? anomalies.slice(0,30).map(a=>`
-          <article class="decision">
-            <div class="eyebrow">${this.esc(a.severity)} · ${this.esc(a.kind)}</div>
-            <h3>${this.esc(a.entity_id)}</h3>
-            <p>${this.esc(a.message)}</p>
-          </article>`).join("") : '<div class="empty">Nessuna anomalia rilevata.</div>'}
-      </section>
+      <h2 class="section-title">COSE DA CONTROLLARE</h2>
+      <section class="grid">${anomalies.length ? anomalies.slice(0,20).map(a=>`
+        <article class="decision"><div class="eyebrow">${this.esc(a.entity_id)}</div><h3>${this.esc(a.message)}</h3><p>Questo dato potrebbe ridurre l'affidabilità delle decisioni finché non viene verificato.</p></article>`).join("") : '<div class="empty">Non vedo problemi importanti nei sensori osservati.</div>'}</section>
     `;
   }
 
@@ -599,11 +601,12 @@ class EsterPanel extends HTMLElement {
     const f = this.summary().daily_forecast || {};
     const uses = f.next_uses || [];
     return `
-      <article class="control">
-        <div class="eyebrow">DAILY HOME FORECAST</div>
-        <h3>${this.esc((f.season || "—").toUpperCase())} · ${this.pct(f.avg_recent_confidence)}</h3>
-        <p>Strategia energia: <b>${this.esc((f.energy_strategy || "—").replaceAll("_"," "))}</b> · Domande aperte: ${this.esc(f.open_questions ?? 0)} · Anomalie: ${this.esc(f.anomalies ?? 0)}</p>
-        ${uses.length ? '<div class="timeline">'+uses.slice(0,8).map(u=>`<div><b>${this.esc(u.area_id)}</b><span>${this.esc(u.label || "")} · tra ${this.esc(u.minutes_until)} min · ${u.comfort_c == null ? "—" : this.esc(u.comfort_c)+" °C"}</span></div>`).join("")+'</div>' : '<div class="empty">Nessun uso stanza previsto nelle prossime ore.</div>'}
+      <article class="control forecast-simple">
+        <div class="eyebrow">OGGI</div>
+        <h3>${uses.length ? "Ecco cosa mi aspetto nelle prossime ore" : "Non ho utilizzi particolari previsti"}</h3>
+        <p>${f.energy_strategy ? "Per l'energia la strategia prevista è: "+this.esc(String(f.energy_strategy).replaceAll("_"," "))+"." : "Sto ancora costruendo il piano energia della giornata."}</p>
+        ${uses.length ? '<div class="timeline">'+uses.slice(0,8).map(u=>`<div><b>${this.esc(u.area_id)}</b><span>${this.esc(u.label || "uso previsto")} · tra ${this.esc(u.minutes_until)} min${u.comfort_c==null?"":" · "+this.esc(u.comfort_c)+" °C"}</span></div>`).join("")+'</div>' : ''}
+        ${this._advanced ? `<details class="tech-details"><summary>DETTAGLI TECNICI</summary><pre>${this.esc(JSON.stringify(f,null,2)).slice(0,2500)}</pre></details>` : ''}
       </article>`;
   }
 
@@ -720,6 +723,8 @@ class EsterPanel extends HTMLElement {
     this.shadowRoot?.querySelectorAll("[data-tab]").forEach(el => {
       el.onclick = () => { this._tab = el.dataset.tab; this.render(); };
     });
+    const modeToggle = this.shadowRoot?.querySelector("#mode-toggle");
+    if (modeToggle) modeToggle.onclick = () => { this._advanced = !this._advanced; this.render(); };
     const teach = this.shadowRoot?.querySelector("#teach-send");
     if (teach) teach.onclick = () => this.teach();
     this.shadowRoot?.querySelectorAll("[data-answer]").forEach(el => el.onclick=()=>this.answer(el.dataset.answer));
@@ -856,6 +861,7 @@ class EsterPanel extends HTMLElement {
         h2.section-title{font-size:12px;font-weight:400;letter-spacing:.26em;color:#63eaff;margin:30px 0 12px;text-transform:uppercase}.lead{font-size:18px;color:#8dbbc6}
         .eyebrow{font-size:10px;letter-spacing:.2em;color:#4acde8;text-transform:uppercase}.statusline{font-family:monospace;color:#6ff7d0;margin:6px 0}.pulse{display:inline-block;width:8px;height:8px;background:#60ffd5;border-radius:50%;box-shadow:0 0 12px #60ffd5;margin-right:8px}
         @keyframes spin{to{transform:rotate(360deg)}}@keyframes pulseRing{50%{transform:scale(1.08);opacity:.55}}
+        .plain-explain{margin:12px 0;padding:10px 12px;border-left:2px solid #46e8ff66;background:#03151b99;color:#9bc7cf;line-height:1.45}.decision-section.primary strong{font-size:19px;color:#ecffff}.simple-confidence{text-align:right}.simple-confidence b{display:block;font:400 11px monospace;letter-spacing:.08em;color:#bdfaff}.simple-confidence span{display:block;font:300 28px monospace;color:#61eaff;text-shadow:0 0 12px #00dfff44}.tech-details{margin-top:12px;border-top:1px solid #38dff229;padding-top:10px}.tech-details summary{cursor:pointer;font:9px monospace;letter-spacing:.15em;color:#57b6c5}.simple-status-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0 20px}.simple-status-grid>div{padding:15px 16px;border-top:1px solid #43e8ff42;border-bottom:1px solid #43e8ff1d;background:linear-gradient(90deg,transparent,#04151ca6 10%,#04151ca6 90%,transparent)}.simple-status-grid b{display:block;font:300 25px monospace;color:#d3fdff}.simple-status-grid span{font-size:10px;color:#73aeb8}.mode-toggle{margin-left:auto!important;border-color:#4ceaff77!important}.human-metrics span{line-height:1.25}.forecast-simple h3{font-size:20px;font-weight:400;color:#dffcff}
         .view-hud-head{position:relative;display:grid;grid-template-columns:110px 1fr minmax(150px,240px);align-items:center;gap:20px;min-height:150px;margin:4px 0 24px;padding:18px 24px;border-top:1px solid #50ecff45;border-bottom:1px solid #50ecff22;background:linear-gradient(90deg,transparent,#041820c4 10%,#041820c4 90%,transparent);overflow:hidden}
         .view-hud-head:before{content:"";position:absolute;inset:0;background-image:linear-gradient(#35dff708 1px,transparent 1px),linear-gradient(90deg,#35dff708 1px,transparent 1px);background-size:22px 22px;mask-image:linear-gradient(90deg,transparent,#000 15%,#000 85%,transparent)}
         .mini-reactor{position:relative;width:86px;height:86px;border-radius:50%;display:grid;place-items:center}.mini-ring{position:absolute;border:1px solid #54eaff;border-radius:50%;box-shadow:0 0 12px #00dfff38}.mini-ring.a{inset:0;border-style:dashed;animation:spin 14s linear infinite}.mini-ring.b{inset:17%;animation:spin 7s linear reverse infinite}.mini-ring.c{inset:32%;border-style:dotted}.mini-core{width:22px;height:22px;border-radius:50%;background:#c8fcff;box-shadow:0 0 15px #fff,0 0 38px #00eaff}
@@ -873,11 +879,11 @@ class EsterPanel extends HTMLElement {
         .decision-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.confidence-block{text-align:right;font-family:monospace}.confidence-block span{display:block;font-size:8px;letter-spacing:.18em;color:#4eaabb}.confidence-block b{font-size:28px;font-weight:400;color:#c9fbff;text-shadow:0 0 12px #4eeaff55}.decision-section{margin:14px 0;padding-left:13px;border-left:1px solid #45e9ff55}.decision-section span{display:block;font-size:9px;letter-spacing:.17em;color:#4cb4c4;margin-bottom:5px}.decision-section strong{font-size:17px;font-weight:400;color:#dcfbff}.decision-section p{margin:0;color:#91c0c8;line-height:1.45}.decision-explainer{margin-bottom:14px}.decision h3,.question h3,.migration h3,.model h3{margin:5px 0 10px;color:#e9fdff}.confidence{font-family:monospace;font-size:25px;color:#68efff}.meter{height:3px;background:#0e2a34;margin:8px 0 14px}.meter span{display:block;height:100%;background:#53edff;box-shadow:0 0 10px #2ae8ff}.decision p,.question p,.energy-core p,.control p,.health p{color:#9dc5cf;line-height:1.5}.proposal{padding:10px 12px;background:#06222c;border-left:2px solid #50e9ff;color:#c8f8ff;margin-top:12px}.meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:#4fa3b3;font-family:monospace;font-size:10px;margin-top:13px}
         .answer-row input{flex:1;min-width:180px}.mic-btn{border-radius:999px;border-color:#69f2ff;box-shadow:0 0 14px #00d9ff44;background:radial-gradient(circle,#0b3444,#041018)}.big-mic{min-width:112px}.quick-row{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.quick{padding:7px 10px;font-size:11px}.question-focus{display:grid;grid-template-columns:120px 1fr;gap:18px;align-items:start}.question-radar{position:relative;width:108px;height:108px;border-radius:50%;border:1px solid #69efff99;display:grid;place-items:center;background:radial-gradient(circle,#0bdcff24 0,#031018 58%,transparent 59%);box-shadow:0 0 25px #00dcff22,inset 0 0 25px #00dcff18}.radar-ring{position:absolute;border:1px solid #43e8ff66;border-radius:50%}.rr1{inset:12%;border-style:dashed;animation:spin 9s linear infinite}.rr2{inset:28%;animation:spin 5s linear reverse infinite}.radar-value{font:700 20px monospace;color:#c9fbff;text-shadow:0 0 12px #56eaff}.question-block{margin:10px 0;padding:9px 12px;border-left:2px solid #28dff2;background:linear-gradient(90deg,#09202a88,transparent)}.question-block span{display:block;font-size:9px;letter-spacing:.18em;color:#49c6dc}.question-block p{margin:5px 0}.question-block.ask{border-left-color:#fff}.question-block.why{border-left-color:#6ff7d0}.hint{font-size:12px;color:#7db5c0;font-style:italic;margin:8px 0}.energy-core{display:flex;align-items:center;gap:35px}.orb{width:150px;height:150px;border-radius:50%;border:1px solid #4dedff;display:grid;place-items:center;box-shadow:0 0 30px #00d9ff45,inset 0 0 35px #00d9ff25;flex:0 0 auto}.orb-core{width:48px;height:48px;border-radius:50%;background:#c9fbff;box-shadow:0 0 50px #16e5ff}.energy-data{flex:1}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metrics.compact b{font-size:19px}.status{font-family:monospace;color:#6ff6cb}.model pre{white-space:pre-wrap;max-height:310px;overflow:auto;color:#7eb9c5;font-size:11px}.empty{padding:30px;color:#6c9da8;border:1px dashed #1bd5ef35;border-radius:10px}
         .health.ok{border-color:#5dffc16b}.health.warn{border-color:#ffc95d59}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:10px 0}.form-grid.one{grid-template-columns:1fr auto}.form-grid label{font-size:11px;color:#68c9da;letter-spacing:.08em}.form-grid label input,.form-grid label select{margin-top:5px}.timeline{display:grid;gap:7px;margin-top:12px}.timeline div{display:flex;justify-content:space-between;gap:15px;padding:9px;border-bottom:1px solid #1cdff322}.timeline span{color:#7bbcca;font-size:12px}
-        @media(max-width:800px){.view-hud-head{grid-template-columns:72px 1fr;min-height:120px;padding:12px}.view-metric{grid-column:1/-1;text-align:left;border-right:0;border-left:1px solid #54eaff55;padding:8px 0 8px 10px}.mini-reactor{width:64px;height:64px}.model,.migration{align-items:flex-start}.panel-orbit{width:80px;height:80px;min-width:80px}.tele-list{grid-template-columns:1fr}.energy-reactor{width:130px;height:130px;min-width:130px;margin:auto}.jarvis-stage{grid-template-columns:1fr;min-height:600px}.telemetry{position:absolute;width:47%;bottom:6px;padding:12px}.telemetry.left{left:0}.telemetry.right{right:0}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}.identity-strip{align-items:flex-start;flex-direction:column}.command-input{grid-template-columns:1fr}.question-panel{grid-template-columns:1fr;padding:20px}.question-index{display:none}.question-context{grid-template-columns:1fr}.answer-console{grid-template-columns:1fr}.question-main h2{font-size:22px}.question-prompt{font-size:18px}.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:310px;gap:18px;padding:18px;flex-direction:column}.jarvis{width:175px;height:175px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
+        @media(max-width:800px){.simple-status-grid{grid-template-columns:repeat(2,1fr)}.mode-toggle{margin-left:0!important}.view-hud-head{grid-template-columns:72px 1fr;min-height:120px;padding:12px}.view-metric{grid-column:1/-1;text-align:left;border-right:0;border-left:1px solid #54eaff55;padding:8px 0 8px 10px}.mini-reactor{width:64px;height:64px}.model,.migration{align-items:flex-start}.panel-orbit{width:80px;height:80px;min-width:80px}.tele-list{grid-template-columns:1fr}.energy-reactor{width:130px;height:130px;min-width:130px;margin:auto}.jarvis-stage{grid-template-columns:1fr;min-height:600px}.telemetry{position:absolute;width:47%;bottom:6px;padding:12px}.telemetry.left{left:0}.telemetry.right{right:0}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}.identity-strip{align-items:flex-start;flex-direction:column}.command-input{grid-template-columns:1fr}.question-panel{grid-template-columns:1fr;padding:20px}.question-index{display:none}.question-context{grid-template-columns:1fr}.answer-console{grid-template-columns:1fr}.question-main h2{font-size:22px}.question-prompt{font-size:18px}.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:310px;gap:18px;padding:18px;flex-direction:column}.jarvis{width:175px;height:175px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
       </style>
       <div class="shell">
         ${this._notice ? '<div class="notice">'+this.esc(this._notice)+'</div>' : ''}
-        <nav>${tabs.map(([id,label])=>`<button data-tab="${id}" class="${this._tab===id?"active":""}">${label}</button>`).join("")}</nav>
+        <nav>${tabs.map(([id,label])=>`<button data-tab="${id}" class="${this._tab===id?"active":""}">${label}</button>`).join("")}<button id="mode-toggle" class="mode-toggle">${this._advanced?"MODALITÀ SEMPLICE":"DETTAGLI TECNICI"}</button></nav>
         ${body}
       </div>
     `;
