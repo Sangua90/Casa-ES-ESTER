@@ -28,6 +28,7 @@ from .scenario import simulate_scenario
 from .discovery import discover_entities
 
 TEXT = vol.All(cv.string, vol.Length(min=1, max=2000))
+TEACH_TEXT = vol.All(cv.string, vol.Length(min=1, max=12000))
 LONG_TEXT = vol.All(cv.string, vol.Length(min=2, max=100000))
 SHORT = vol.All(cv.string, vol.Length(min=1, max=100))
 
@@ -478,7 +479,7 @@ def register_services(hass):
         "answer_question": (answer_question, {vol.Required("question_id"): SHORT, vol.Required("answer"): TEXT}),
         "select_voice_question": (select_voice_question, {vol.Required("question_id"): SHORT}),
         "dismiss_question": (dismiss_question, {vol.Required("question_id"): SHORT}),
-        "interpret_message": (interpret_message, {vol.Required("message"): TEXT, vol.Optional("preview", default=True): cv.boolean}),
+        "interpret_message": (interpret_message, {vol.Required("message"): TEACH_TEXT, vol.Optional("preview", default=True): cv.boolean}),
         "confirm_teaching": (confirm_teaching, {vol.Required("proposal_id"): SHORT}),
         "discard_teaching": (discard_teaching, {vol.Required("proposal_id"): SHORT}),
         "export_memory": (export_memory, {}),
