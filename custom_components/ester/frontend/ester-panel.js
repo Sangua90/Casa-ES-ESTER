@@ -1112,12 +1112,9 @@ class EsterPanel extends HTMLElement {
         </section>
 
         <section class="command-deck">
-          <div class="command-head"><span>VOCE / TESTO</span><b>PARLA CON E.S.T.E.R.</b></div>
-          <div class="command-input">
-            <textarea id="teach" placeholder="Parla o scrivi: «Questo weekend siamo via», «Ester oggi è a casa», «La palestra la uso alle 19»…"></textarea>
-            <button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button>
-            <button id="teach-send">${this._busy ? "..." : "INVIA"}</button>
-          </div>
+          <div class="command-head"><span>CONOSCENZA CASA</span><b>INSEGNA A E.S.T.E.R.</b></div>
+          <p>Per raccontarmi come vivete la casa, cosa preferite e le eccezioni, usa la sezione INSEGNA. Prima di ricordare qualcosa ti farò sempre controllare cosa ho capito.</p>
+          <button data-tab="teach">APRI INSEGNA</button>
         </section>
         <h2 class="section-title">PREVISIONE CASA</h2>
         ${this.forecastCard()}
