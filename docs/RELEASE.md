@@ -5,6 +5,7 @@
 - La stagione segue la modalità heat/cool dell'impianto, altrimenti il calendario locale.
 - «Non lo so» rinvia di sette giorni senza insegnare preferenze.
 - Corretto un errore di sintassi del pannello nella 1.4.3.
+- Corretti i pulsanti PARLA: trascrizione nel campo visibile, frasi accumulate, errori espliciti e controllo del testo prima dell'invio.
 - Shadow Mode permanente: nessuna azione sui dispositivi.
 
 Aggiornare da HACS e riavviare Home Assistant, poi ricaricare E.S.T.E.R. Le domande pertinenti vengono aggiornate alla successiva valutazione.
