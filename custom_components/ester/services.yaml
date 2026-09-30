@@ -291,14 +291,14 @@ remove_flexible_load:
 
 run_replay:
   name: "Replay storico"
-  description: "Rigioca fino a 30 giorni di Recorder nel motore Shadow attuale. Non esegue azioni."
+  description: "Rigioca fino a 56 giorni di Recorder nel motore Shadow attuale. Non esegue azioni."
   fields:
     days:
       name: "Giorni"
       selector:
         number:
           min: 1
-          max: 30
+          max: 56
           mode: box
     step_minutes:
       name: "Passo minuti"
