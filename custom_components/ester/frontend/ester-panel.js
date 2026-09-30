@@ -17,9 +17,9 @@ class EsterPanel extends HTMLElement {
     this._neuralImpulses = [];
   }
 
-  set hass(value) { this._hass = value; this.render(); }
+  set hass(value) { this._hass = value; if (!this.shadowRoot?.querySelector(".shell")) this.render(); else this.refreshDataOnly(); }
   set panel(value) { this._panel = value; }
-  connectedCallback() { this.render(); }
+  connectedCallback() { this.render(); }\n\n  refreshDataOnly() {\n    // Home Assistant updates `hass` very frequently. Rebuilding the whole Shadow DOM here\n    // resets native horizontal scrolling on iPhone, making the tab bar jump back to the left.\n    // Keep the current DOM/scroll position; explicit user actions still call render().\n    if (this._tab === "overview") this.startNeuralCore();\n  }
   disconnectedCallback() { this.stopNeuralCore(); }
 
   state(id) { return this._hass?.states?.[id]; }
@@ -1181,9 +1181,9 @@ class EsterPanel extends HTMLElement {
           :host{overflow-x:hidden}
           .shell{width:100%;max-width:100vw;padding:8px 10px 34px;overflow-x:hidden}
           .mobile-nav-wrap{position:sticky;top:0;z-index:20;margin:0 -10px 12px;padding:7px 10px 9px;background:linear-gradient(#03080d 72%,#03080de8 88%,transparent)}
-          nav{position:relative;top:auto;z-index:auto;display:flex;flex-wrap:nowrap;gap:7px;width:100%;max-width:100%;overflow-x:auto;overflow-y:hidden;padding:2px 1px 8px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x;scrollbar-width:none;background:none}
+          nav{position:relative;top:auto;z-index:auto;display:flex;flex-wrap:nowrap;gap:7px;width:100%;max-width:100%;overflow-x:auto;overflow-y:hidden;padding:2px 1px 8px;scroll-snap-type:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x;scrollbar-width:none;background:none}
           nav::-webkit-scrollbar{display:none}
-          nav button{flex:0 0 auto;min-width:max-content;padding:9px 12px;font-size:11px;white-space:nowrap;scroll-snap-align:center}
+          nav button{flex:0 0 auto;min-width:max-content;padding:9px 12px;font-size:11px;white-space:nowrap}
           nav button.active{position:relative}
           .mode-toggle{display:block;width:100%;margin:2px 0 0!important;padding:8px 10px;font-size:10px}
           .view-hud-head{grid-template-columns:58px minmax(0,1fr)!important;min-height:auto!important;padding:10px!important;gap:9px}
