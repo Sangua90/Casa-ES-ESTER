@@ -388,7 +388,7 @@ def register_services(hass):
             checkpoint(coordinator, "Prima dell'import memoria", "Import JSON")
             for key in allowed:
                 if key in incoming:
-                    expected_dict = key in {"preferences", "classifications"}
+                    expected_dict = key in {"preferences", "classifications", "safety_policies", "fallback_policies"}
                     if expected_dict and not isinstance(incoming[key], dict):
                         raise ServiceValidationError(f"{key} must be an object")
                     if not expected_dict and not isinstance(incoming[key], list):
