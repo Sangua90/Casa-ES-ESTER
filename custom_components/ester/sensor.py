@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, VERSION
 from .coordinator import EsterCoordinator
 
 
@@ -47,7 +47,7 @@ class EsterBaseSensor(CoordinatorEntity[EsterCoordinator], SensorEntity):
             "name": "E.S.T.E.R.",
             "manufacturer": "Casa ES",
             "model": "Intelligent Home Manager",
-            "sw_version": "1.4.0",
+            "sw_version": VERSION,
         }
 
 
