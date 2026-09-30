@@ -106,6 +106,10 @@ class EsterPanel extends HTMLElement {
   async teach() {
     const el = this.shadowRoot?.querySelector("#teach");
     const message = el?.value?.trim();
+    return this.teachText(message);
+  }
+
+  async teachText(message) {
     if (!message || !this._hass || this._busy) return;
     this._busy = true;
     this._notice = "Sto capendo quello che mi hai raccontato…";
@@ -206,7 +210,8 @@ class EsterPanel extends HTMLElement {
           if (questionId) await this.answer(questionId, text.trim());
           else {
             this._notice = "Ho sentito: «" + text.trim() + "»";
-            await this.call("ester","interpret_message",{message:text.trim()});
+            if (targetId === "teach") await this.teachText(text.trim());
+            else await this.call("ester","interpret_message",{message:text.trim()});
           }
         }
       };
