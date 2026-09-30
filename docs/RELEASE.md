@@ -1,41 +1,9 @@
-## E.S.T.E.R. 1.4.0 — Pre-Autonomy Shadow
+## E.S.T.E.R. 1.4.1 — Extended Historical Replay
 
-Questa release completa il livello di validazione prima dell'autonomia, mantenendo **zero attuazione reale**.
-
-### Validazione
-- Replay Recorder da 1 a 30 giorni, con checkpoint e statistiche su decisioni/confidence/rischio.
-- What-if per modalità casa, comfort e costo energia senza persistenza.
-- KPI Shadow, confidence media, feedback quality, domande e anomalie.
-- Autonomy Health per energia, clima, sicurezza, ACS e ventilazione.
-
-### Decisione
-- Planner multi-obiettivo whole-home.
-- Pesi regolabili: sicurezza, comfort, costo, energia, usura apparati, confidence.
-- Priorità decisione separata dalla readiness all'esecuzione.
-- Confidence calibrata con feedback per dominio.
-- Forecast giornaliero locale e stagionalità automatica.
-- Errore di previsione osservabile quando disponibile; nessuna causalità inventata.
-
-### Interfaccia
-- Centro E.S.T.E.R. laterale con CORE, DECISIONI, DOMANDE, ENERGIA, APPRENDIMENTO, VALIDAZIONE, MIGRAZIONE e CONFIG.
-- Storico decisioni filtrabile.
-- Editor routine d'uso casa.
-- Editor carichi energetici gestiti.
-- Wizard classificazione entità e dati mancanti.
-- Question Inbox guidata: osservazione, informazione mancante, motivo della domanda, esempi e risposte rapide.
-- Dettatura vocale nei campi; fallback Assist nativo nel Companion App con collegamento alla domanda selezionata.
-- Redesign del centro di controllo con strumentazione circolare/olografica ispirata al linguaggio HUD di JARVIS, senza asset Marvel.
-- Replay e scenari avviabili dal pannello.
-- Snapshot e rollback direttamente dal pannello.
-- Export/import JSON della memoria.
-
-### Sicurezza
-- Le automazioni legacy restano attive.
-- Casa ES Energy Manager non viene disattivato automaticamente.
-- Nessuna automazione viene rimossa automaticamente.
-- Nessun servizio HA di attuazione viene chiamato.
-- L'executor reale non esiste in questa release.
-
-**L'unico salto architetturale ancora escluso è la futura rimozione controllata dello Shadow Mode.**
+- Replay storico esteso da 30 a **56 giorni / 8 settimane**.
+- Lettura Recorder/MariaDB suddivisa in finestre da 7 giorni per ridurre il carico.
+- Nuovo pulsante **REPLAY 8 SETTIMANE** nella sezione VALIDAZIONE.
+- Il replay resta completamente Shadow: zero attuazioni e zero modifiche allo storico.
+- Utile per accelerare la validazione di energia, clima, presenza, ACS, ventilazione e sicurezza usando dati già presenti in Home Assistant.
 
 Richiede Home Assistant 2026.9.4 o successivo.
