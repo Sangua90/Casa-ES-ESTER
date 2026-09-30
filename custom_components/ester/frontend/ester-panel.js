@@ -402,14 +402,43 @@ class EsterPanel extends HTMLElement {
     }).join("");
   }
 
+  viewHeader(code, title, subtitle, metric="SHADOW", metricLabel="MODE") {
+    return `
+      <section class="view-hud-head">
+        <div class="mini-reactor">
+          <div class="mini-ring a"></div><div class="mini-ring b"></div><div class="mini-ring c"></div>
+          <div class="mini-core"></div>
+        </div>
+        <div class="view-copy">
+          <div class="hud-label">${this.esc(code)}</div>
+          <h1 class="view-title">${this.esc(title)}</h1>
+          <p>${this.esc(subtitle)}</p>
+        </div>
+        <div class="view-metric">
+          <span>${this.esc(metricLabel)}</span>
+          <b>${this.esc(metric)}</b>
+          <i></i>
+        </div>
+      </section>`;
+  }
+
+  hudGauge(label, value, detail="") {
+    const n = Number(value);
+    const pct = Number.isFinite(n) ? Math.max(0,Math.min(100,Math.round(n*100))) : 0;
+    return `<div class="hud-gauge" style="--pct:${pct}">
+      <div class="gauge-face"><b>${Number.isFinite(n)?pct+"%":"—"}</b><span>${this.esc(label)}</span></div>
+      ${detail ? '<small>'+this.esc(detail)+'</small>' : ''}
+    </div>`;
+  }
+
   energyCard() {
     const d = this.latest().slice().reverse().find(x => x.category === "energy");
     if (!d) return '<div class="empty">Il planner energia non ha ancora una decisione completa.</div>';
     const p = d.evidence?.energy_plan || {};
     const managed = d.evidence?.managed_load_plan || [];
     return `
-      <article class="energy-core">
-        <div class="orb"><div class="orb-core"></div></div>
+      <article class="energy-core hud-panel">
+        <div class="energy-reactor"><div class="energy-ring er1"></div><div class="energy-ring er2"></div><div class="energy-core-dot"></div><span>${this.esc(p.battery_soc ?? "—")}%</span></div>
         <div class="energy-data">
           <div class="eyebrow">LOCAL ENERGY CORE</div>
           <h2>${this.esc((p.strategy || "learning").replaceAll("_"," ").toUpperCase())}</h2>
@@ -437,36 +466,60 @@ class EsterPanel extends HTMLElement {
   migrationCards() {
     const items = Object.entries(this.migration());
     if (!items.length) return '<div class="empty">Nessuna automazione legacy classificata.</div>';
-    return items.map(([name,x]) => `
-      <article class="migration">
-        <div class="decision-head">
-          <div><div class="eyebrow">LEGACY DOMAIN</div><h3>${this.esc(name.toUpperCase())}</h3></div>
-          <span class="status">${this.esc(x.status || "observe")}</span>
+    return items.map(([name,x], index) => {
+      const feedback = x.empirical_feedback_score;
+      return `
+      <article class="migration hud-panel">
+        <div class="panel-orbit">
+          <div class="panel-ring"></div>
+          <b>${feedback == null ? this.esc(x.shadow_decisions_checked ?? 0) : this.pct(feedback)}</b>
+          <span>${feedback == null ? "TEST" : "FEEDBACK"}</span>
         </div>
-        <div class="metrics compact">
-          <div><b>${this.esc(x.legacy_automations ?? 0)}</b><span>AUTOMAZIONI</span></div>
-          <div><b>${this.esc(x.shadow_decisions_checked ?? 0)}</b><span>DECISIONI</span></div>
-          <div><b>${this.esc(x.open_questions ?? 0)}</b><span>DOMANDE</span></div>
-          <div><b>${x.empirical_feedback_score == null ? "—" : this.pct(x.empirical_feedback_score)}</b><span>FEEDBACK</span></div>
+        <div class="panel-body">
+          <div class="eyebrow">MIGRATION / ${String(index+1).padStart(2,"0")}</div>
+          <div class="decision-head">
+            <h3>${this.esc(this.categoryLabel(name))}</h3>
+            <span class="status">${this.esc((x.status || "observe").replaceAll("_"," ").toUpperCase())}</span>
+          </div>
+          <div class="tele-list">
+            <div><span>AUTOMAZIONI LEGACY</span><b>${this.esc(x.legacy_automations ?? 0)}</b></div>
+            <div><span>DECISIONI SHADOW</span><b>${this.esc(x.shadow_decisions_checked ?? 0)}</b></div>
+            <div><span>DOMANDE APERTE</span><b>${this.esc(x.open_questions ?? 0)}</b></div>
+          </div>
+          <div class="meta"><span>DISATTIVAZIONE AUTOMATICA</span><span>NO</span></div>
         </div>
-        <div class="meta"><span>DISATTIVAZIONE AUTOMATICA</span><span>NO</span></div>
-      </article>
-    `).join("");
+      </article>`;
+    }).join("");
   }
 
   learningCards() {
     const s = this.summary();
     const groups = [
-      ["THERMAL",s.thermal_models||{}],["VENTILATION",s.ventilation_models||{}],
-      ["HOT WATER",s.hot_water_models||{}],["OCCUPANCY",s.occupancy_models||{}]
+      ["THERMAL","MODEL / 01",s.thermal_models||{},"Risposta termica delle stanze"],
+      ["VENTILATION","MODEL / 02",s.ventilation_models||{},"Efficacia reale della ventilazione"],
+      ["HOT WATER","MODEL / 03",s.hot_water_models||{},"Recupero e dispersione ACS"],
+      ["OCCUPANCY","MODEL / 04",s.occupancy_models||{},"Probabilità di utilizzo degli ambienti"]
     ];
-    return groups.map(([label,data]) => `
-      <article class="model">
-        <div class="eyebrow">${label}</div>
-        <h3>${Object.keys(data).length} modelli</h3>
-        <pre>${this.esc(JSON.stringify(data,null,2)).slice(0,1800)}</pre>
-      </article>
-    `).join("");
+    return groups.map(([label,code,data,desc]) => {
+      const vals = Object.values(data).map(x=>Number(x?.confidence)).filter(Number.isFinite);
+      const avg = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+      return `
+        <article class="model hud-panel">
+          <div class="panel-orbit">
+            <div class="panel-ring"></div>
+            <b>${Object.keys(data).length}</b>
+            <span>MODELLI</span>
+          </div>
+          <div class="panel-body">
+            <div class="eyebrow">${code}</div>
+            <h3>${label}</h3>
+            <p>${desc}</p>
+            <div class="signal-line"><span style="width:${avg==null?0:Math.round(avg*100)}%"></span></div>
+            <div class="meta"><span>CONFIDENCE MEDIA</span><span>${avg==null?"—":this.pct(avg)}</span></div>
+            <details><summary>DETTAGLI TECNICI</summary><pre>${this.esc(JSON.stringify(data,null,2)).slice(0,2600)}</pre></details>
+          </div>
+        </article>`;
+    }).join("");
   }
 
   validationView() {
@@ -477,6 +530,7 @@ class EsterPanel extends HTMLElement {
     const scenario = s.last_scenario || {};
     const anomalies = s.anomalies || [];
     return `
+      ${this.viewHeader("VALIDATION / 06","VALIDAZIONE","Replay storico, KPI, simulazioni e salute pre-autonomia.", h.feedback_quality==null?"—":this.pct(h.feedback_quality),"QUALITY")}
       <h2 class="section-title">AUTONOMY HEALTH</h2>
       <article class="health ${h.overall_ready_for_executor ? "ok" : "warn"}">
         <div class="decision-head">
@@ -562,6 +616,7 @@ class EsterPanel extends HTMLElement {
     const loads = this.summary().flexible_loads || [];
     const gaps = this.state("sensor.e_s_t_e_r_data_suggestions")?.attributes?.items || [];
     return `
+      ${this.viewHeader("CONFIG / 08","CONFIGURAZIONE","Routine, carichi, mappature, pesi decisionali e memoria.","ADMIN","ACCESS")}
       <h2 class="section-title">PESI MULTI-OBIETTIVO</h2>
       <section class="grid">
         ${weights.map(w=>`
@@ -766,19 +821,19 @@ class EsterPanel extends HTMLElement {
       `;
     } else if (this._tab === "decisions") {
       const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety"];
-      body = '<h2 class="section-title">DECISIONI CHE E.S.T.E.R. AVREBBE PRESO</h2><article class="control decision-explainer"><p>Le decisioni sono raggruppate per tipo, così puoi leggere subito Energia, Clima, Sicurezza, Luci e gli altri domini separatamente.</p><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
+      body = this.viewHeader("DECISION / 02","DECISIONI","Le scelte che E.S.T.E.R. avrebbe eseguito, ordinate per dominio.",this.pct(s.kpis?.avg_confidence),"CONFIDENCE")+'<h2 class="section-title">DECISIONI CHE E.S.T.E.R. AVREBBE PRESO</h2><article class="control decision-explainer"><p>Le decisioni sono raggruppate per tipo, così puoi leggere subito Energia, Clima, Sicurezza, Luci e gli altri domini separatamente.</p><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
     } else if (this._tab === "questions") {
-      body = '<h2 class="section-title">QUESTION INBOX · DIMMI QUELLO CHE MANCA</h2><article class="control"><p>Le domande sono raggruppate per argomento, così puoi rispondere prima a Energia, Clima, Sicurezza o agli altri gruppi senza mescolare tutto.</p></article>'+this.groupedQuestionCards();
+      body = this.viewHeader("QUESTIONS / 03","DOMANDE","Informazioni che E.S.T.E.R. ti chiede per ridurre l'incertezza.",String(questionCount),"APERTE")+'<h2 class="section-title">QUESTION INBOX · DIMMI QUELLO CHE MANCA</h2><article class="control"><p>Le domande sono raggruppate per argomento, così puoi rispondere prima a Energia, Clima, Sicurezza o agli altri gruppi senza mescolare tutto.</p></article>'+this.groupedQuestionCards();
     } else if (this._tab === "energy") {
-      body = '<h2 class="section-title">ENERGY MANAGER INTEGRATO</h2>'+this.energyCard()+
+      body = this.viewHeader("ENERGY / 04","ENERGIA","Planner integrato FV, rete, batteria, limiti e carichi flessibili.",this.esc((s.daily_forecast?.energy_strategy||"LEARNING").replaceAll("_"," ").toUpperCase()),"STRATEGY")+'<h2 class="section-title">ENERGY MANAGER INTEGRATO</h2>'+this.energyCard()+
         '<h2 class="section-title">ULTIME DECISIONI ENERGIA</h2>'+
         this.groupedDecisionCards(this.realDecisions().filter(x=>x.category==="energy"));
     } else if (this._tab === "learning") {
-      body = '<h2 class="section-title">MODELLI APPRESI</h2><section class="grid">'+this.learningCards()+'</section>';
+      body = this.viewHeader("LEARNING / 05","APPRENDIMENTO","Modelli locali costruiti dallo storico reale della casa.",String((Object.keys(s.thermal_models||{}).length+Object.keys(s.occupancy_models||{}).length+Object.keys(s.hot_water_models||{}).length+Object.keys(s.ventilation_models||{}).length)),"MODELLI")+'<h2 class="section-title">MODELLI APPRESI</h2><section class="grid">'+this.learningCards()+'</section>';
     } else if (this._tab === "validation") {
       body = this.validationView();
     } else if (this._tab === "migration") {
-      body = '<h2 class="section-title">MIGRAZIONE AUTOMAZIONI</h2><section class="grid">'+this.migrationCards()+'</section>';
+      body = this.viewHeader("MIGRATION / 07","MIGRAZIONE","Confronto tra logiche legacy e comportamento Shadow E.S.T.E.R.",String(Object.keys(this.migration()).length),"DOMINI")+'<h2 class="section-title">MIGRAZIONE AUTOMAZIONI</h2><section class="grid">'+this.migrationCards()+'</section>';
     } else if (this._tab === "config") {
       body = this.configView();
     }
@@ -801,6 +856,16 @@ class EsterPanel extends HTMLElement {
         h2.section-title{font-size:12px;font-weight:400;letter-spacing:.26em;color:#63eaff;margin:30px 0 12px;text-transform:uppercase}.lead{font-size:18px;color:#8dbbc6}
         .eyebrow{font-size:10px;letter-spacing:.2em;color:#4acde8;text-transform:uppercase}.statusline{font-family:monospace;color:#6ff7d0;margin:6px 0}.pulse{display:inline-block;width:8px;height:8px;background:#60ffd5;border-radius:50%;box-shadow:0 0 12px #60ffd5;margin-right:8px}
         @keyframes spin{to{transform:rotate(360deg)}}@keyframes pulseRing{50%{transform:scale(1.08);opacity:.55}}
+        .view-hud-head{position:relative;display:grid;grid-template-columns:110px 1fr minmax(150px,240px);align-items:center;gap:20px;min-height:150px;margin:4px 0 24px;padding:18px 24px;border-top:1px solid #50ecff45;border-bottom:1px solid #50ecff22;background:linear-gradient(90deg,transparent,#041820c4 10%,#041820c4 90%,transparent);overflow:hidden}
+        .view-hud-head:before{content:"";position:absolute;inset:0;background-image:linear-gradient(#35dff708 1px,transparent 1px),linear-gradient(90deg,#35dff708 1px,transparent 1px);background-size:22px 22px;mask-image:linear-gradient(90deg,transparent,#000 15%,#000 85%,transparent)}
+        .mini-reactor{position:relative;width:86px;height:86px;border-radius:50%;display:grid;place-items:center}.mini-ring{position:absolute;border:1px solid #54eaff;border-radius:50%;box-shadow:0 0 12px #00dfff38}.mini-ring.a{inset:0;border-style:dashed;animation:spin 14s linear infinite}.mini-ring.b{inset:17%;animation:spin 7s linear reverse infinite}.mini-ring.c{inset:32%;border-style:dotted}.mini-core{width:22px;height:22px;border-radius:50%;background:#c8fcff;box-shadow:0 0 15px #fff,0 0 38px #00eaff}
+        .view-copy{position:relative;z-index:1}.view-copy p{margin:6px 0;color:#79aeb8}.view-title{margin:3px 0;font:300 clamp(28px,4vw,52px)/1 monospace;letter-spacing:.12em;color:#e8fdff;text-shadow:0 0 16px #49eaff55}.view-metric{position:relative;z-index:1;text-align:right;border-right:1px solid #54eaff55;padding-right:14px}.view-metric span{display:block;font:8px monospace;letter-spacing:.22em;color:#4caaba}.view-metric b{display:block;margin:5px 0;font:300 24px monospace;color:#c9fbff}.view-metric i{display:block;margin-left:auto;width:70%;height:1px;background:linear-gradient(90deg,transparent,#52eaff)}
+        .hud-panel,.control,.health,.decision,.question-panel,.migration,.model,.energy-core{position:relative;border:0!important;border-top:1px solid #4eeaff40!important;border-bottom:1px solid #4eeaff1e!important;background:linear-gradient(90deg,transparent,#04161dc4 7%,#04161dc4 93%,transparent)!important;border-radius:0!important;clip-path:polygon(0 9px,9px 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%);box-shadow:none!important}
+        .hud-panel:before,.control:before,.health:before,.decision:before,.question-panel:before{content:"";position:absolute;left:0;top:22%;bottom:22%;width:2px;background:#51ecff;box-shadow:0 0 10px #00dfff88}
+        .panel-orbit{position:relative;width:112px;height:112px;min-width:112px;border-radius:50%;display:grid;place-items:center;align-content:center}.panel-orbit .panel-ring{position:absolute;inset:5px;border:1px dashed #4ceaff99;border-radius:50%;animation:spin 16s linear infinite;box-shadow:0 0 15px #00dfff25}.panel-orbit:after{content:"";position:absolute;inset:24px;border:1px solid #4ceaff55;border-radius:50%}.panel-orbit b{font:300 24px monospace;color:#d5fdff;z-index:1}.panel-orbit span{font:7px monospace;letter-spacing:.16em;color:#55aeba;z-index:1}.panel-body{flex:1;min-width:0}.model,.migration{display:flex;gap:20px;align-items:center}.model h3,.migration h3{font:400 20px monospace;letter-spacing:.08em}.model details{margin-top:12px;color:#629da8}.model summary{cursor:pointer;font:9px monospace;letter-spacing:.14em;color:#55b8c8}.signal-line{height:2px;background:#0a2b34;margin:14px 0}.signal-line span{display:block;height:100%;background:#54ebff;box-shadow:0 0 10px #54ebff}
+        .tele-list{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.tele-list>div{padding:8px 10px;border-top:1px solid #40eaff2e;background:#03121980}.tele-list span{display:block;font:8px monospace;letter-spacing:.12em;color:#579ba7}.tele-list b{font:300 18px monospace;color:#c7faff}
+        .energy-reactor{position:relative;width:160px;height:160px;min-width:160px;border-radius:50%;display:grid;place-items:center;box-shadow:0 0 35px #00dfff22}.energy-ring{position:absolute;border-radius:50%;border:1px solid #51ecff}.er1{inset:4%;border-style:dashed;animation:spin 13s linear infinite}.er2{inset:22%;border-width:2px;animation:spin 7s linear reverse infinite}.energy-core-dot{width:54px;height:54px;border-radius:50%;background:radial-gradient(circle,#d8ffff 0 8%,#55eaff 10%,#073b46 30%,#021014 65%);box-shadow:0 0 18px #fff,0 0 55px #00eaff}.energy-reactor>span{position:absolute;bottom:14px;font:10px monospace;color:#79eaf8}
+        .hud-gauge{position:relative;width:120px;height:120px;border-radius:50%;background:conic-gradient(#56eaff calc(var(--pct)*1%),#0b2a33 0);padding:3px;box-shadow:0 0 20px #00dfff22}.hud-gauge:after{content:"";position:absolute;inset:7px;border-radius:50%;background:#031016}.gauge-face{position:absolute;inset:0;z-index:2;display:grid;place-items:center;align-content:center}.gauge-face b{font:300 25px monospace;color:#e3feff}.gauge-face span{font:7px monospace;letter-spacing:.15em;color:#5eabb7}.hud-gauge small{position:absolute;top:100%;left:0;right:0;text-align:center;color:#659ba5}
         .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}.stats>div,.metrics>div{padding:18px;border:1px solid #16d8ff35;background:#06151d9e;border-radius:10px}.stats b,.metrics b{display:block;font-size:28px;color:#d9fbff}.stats span,.metrics span{font-size:10px;letter-spacing:.14em;color:#55bdd0}
         .teach,.control,.health{border:1px solid #1eddfc40;background:#041219c8;border-radius:12px;padding:15px}.teach-row,.answer-row,.button-row{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
         textarea,input,select{width:100%;border:1px solid #25dffc44;background:#02090e;color:#dcfbff;border-radius:8px;padding:11px}.teach textarea,.control textarea{min-height:85px;resize:vertical}
@@ -808,7 +873,7 @@ class EsterPanel extends HTMLElement {
         .decision-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.confidence-block{text-align:right;font-family:monospace}.confidence-block span{display:block;font-size:8px;letter-spacing:.18em;color:#4eaabb}.confidence-block b{font-size:28px;font-weight:400;color:#c9fbff;text-shadow:0 0 12px #4eeaff55}.decision-section{margin:14px 0;padding-left:13px;border-left:1px solid #45e9ff55}.decision-section span{display:block;font-size:9px;letter-spacing:.17em;color:#4cb4c4;margin-bottom:5px}.decision-section strong{font-size:17px;font-weight:400;color:#dcfbff}.decision-section p{margin:0;color:#91c0c8;line-height:1.45}.decision-explainer{margin-bottom:14px}.decision h3,.question h3,.migration h3,.model h3{margin:5px 0 10px;color:#e9fdff}.confidence{font-family:monospace;font-size:25px;color:#68efff}.meter{height:3px;background:#0e2a34;margin:8px 0 14px}.meter span{display:block;height:100%;background:#53edff;box-shadow:0 0 10px #2ae8ff}.decision p,.question p,.energy-core p,.control p,.health p{color:#9dc5cf;line-height:1.5}.proposal{padding:10px 12px;background:#06222c;border-left:2px solid #50e9ff;color:#c8f8ff;margin-top:12px}.meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:#4fa3b3;font-family:monospace;font-size:10px;margin-top:13px}
         .answer-row input{flex:1;min-width:180px}.mic-btn{border-radius:999px;border-color:#69f2ff;box-shadow:0 0 14px #00d9ff44;background:radial-gradient(circle,#0b3444,#041018)}.big-mic{min-width:112px}.quick-row{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.quick{padding:7px 10px;font-size:11px}.question-focus{display:grid;grid-template-columns:120px 1fr;gap:18px;align-items:start}.question-radar{position:relative;width:108px;height:108px;border-radius:50%;border:1px solid #69efff99;display:grid;place-items:center;background:radial-gradient(circle,#0bdcff24 0,#031018 58%,transparent 59%);box-shadow:0 0 25px #00dcff22,inset 0 0 25px #00dcff18}.radar-ring{position:absolute;border:1px solid #43e8ff66;border-radius:50%}.rr1{inset:12%;border-style:dashed;animation:spin 9s linear infinite}.rr2{inset:28%;animation:spin 5s linear reverse infinite}.radar-value{font:700 20px monospace;color:#c9fbff;text-shadow:0 0 12px #56eaff}.question-block{margin:10px 0;padding:9px 12px;border-left:2px solid #28dff2;background:linear-gradient(90deg,#09202a88,transparent)}.question-block span{display:block;font-size:9px;letter-spacing:.18em;color:#49c6dc}.question-block p{margin:5px 0}.question-block.ask{border-left-color:#fff}.question-block.why{border-left-color:#6ff7d0}.hint{font-size:12px;color:#7db5c0;font-style:italic;margin:8px 0}.energy-core{display:flex;align-items:center;gap:35px}.orb{width:150px;height:150px;border-radius:50%;border:1px solid #4dedff;display:grid;place-items:center;box-shadow:0 0 30px #00d9ff45,inset 0 0 35px #00d9ff25;flex:0 0 auto}.orb-core{width:48px;height:48px;border-radius:50%;background:#c9fbff;box-shadow:0 0 50px #16e5ff}.energy-data{flex:1}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metrics.compact b{font-size:19px}.status{font-family:monospace;color:#6ff6cb}.model pre{white-space:pre-wrap;max-height:310px;overflow:auto;color:#7eb9c5;font-size:11px}.empty{padding:30px;color:#6c9da8;border:1px dashed #1bd5ef35;border-radius:10px}
         .health.ok{border-color:#5dffc16b}.health.warn{border-color:#ffc95d59}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:10px 0}.form-grid.one{grid-template-columns:1fr auto}.form-grid label{font-size:11px;color:#68c9da;letter-spacing:.08em}.form-grid label input,.form-grid label select{margin-top:5px}.timeline{display:grid;gap:7px;margin-top:12px}.timeline div{display:flex;justify-content:space-between;gap:15px;padding:9px;border-bottom:1px solid #1cdff322}.timeline span{color:#7bbcca;font-size:12px}
-        @media(max-width:800px){.jarvis-stage{grid-template-columns:1fr;min-height:600px}.telemetry{position:absolute;width:47%;bottom:6px;padding:12px}.telemetry.left{left:0}.telemetry.right{right:0}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}.identity-strip{align-items:flex-start;flex-direction:column}.command-input{grid-template-columns:1fr}.question-panel{grid-template-columns:1fr;padding:20px}.question-index{display:none}.question-context{grid-template-columns:1fr}.answer-console{grid-template-columns:1fr}.question-main h2{font-size:22px}.question-prompt{font-size:18px}.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:310px;gap:18px;padding:18px;flex-direction:column}.jarvis{width:175px;height:175px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
+        @media(max-width:800px){.view-hud-head{grid-template-columns:72px 1fr;min-height:120px;padding:12px}.view-metric{grid-column:1/-1;text-align:left;border-right:0;border-left:1px solid #54eaff55;padding:8px 0 8px 10px}.mini-reactor{width:64px;height:64px}.model,.migration{align-items:flex-start}.panel-orbit{width:80px;height:80px;min-width:80px}.tele-list{grid-template-columns:1fr}.energy-reactor{width:130px;height:130px;min-width:130px;margin:auto}.jarvis-stage{grid-template-columns:1fr;min-height:600px}.telemetry{position:absolute;width:47%;bottom:6px;padding:12px}.telemetry.left{left:0}.telemetry.right{right:0}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}.identity-strip{align-items:flex-start;flex-direction:column}.command-input{grid-template-columns:1fr}.question-panel{grid-template-columns:1fr;padding:20px}.question-index{display:none}.question-context{grid-template-columns:1fr}.answer-console{grid-template-columns:1fr}.question-main h2{font-size:22px}.question-prompt{font-size:18px}.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:310px;gap:18px;padding:18px;flex-direction:column}.jarvis{width:175px;height:175px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
       </style>
       <div class="shell">
         ${this._notice ? '<div class="notice">'+this.esc(this._notice)+'</div>' : ''}
