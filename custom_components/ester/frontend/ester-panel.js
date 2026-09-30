@@ -194,7 +194,7 @@ class EsterPanel extends HTMLElement {
       const recognition = new SpeechRecognition();
       recognition.lang = (this._hass.language || "it").startsWith("it") ? "it-IT" : (this._hass.language || "it-IT");
       recognition.interimResults = true;
-      recognition.continuous = false;
+      recognition.continuous = targetId === "teach";
       this._notice = "Ti ascolto…";
       this.render();
 
@@ -208,10 +208,15 @@ class EsterPanel extends HTMLElement {
         target.value = text.trim();
         if (final && text.trim()) {
           if (questionId) await this.answer(questionId, text.trim());
-          else {
+          else if (targetId === "teach") {
+            const previous = target.dataset.finalText || "";
+            const combined = (previous + " " + text.trim()).trim();
+            target.dataset.finalText = combined;
+            target.value = combined;
+            this._notice = "Ti ascolto… puoi continuare a parlare. Premi INVIA quando hai finito.";
+          } else {
             this._notice = "Ho sentito: «" + text.trim() + "»";
-            if (targetId === "teach") await this.teachText(text.trim());
-            else await this.call("ester","interpret_message",{message:text.trim()});
+            await this.call("ester","interpret_message",{message:text.trim()});
           }
         }
       };
