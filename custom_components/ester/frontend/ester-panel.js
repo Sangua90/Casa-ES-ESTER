@@ -8,6 +8,7 @@ class EsterPanel extends HTMLElement {
     this._decisionCategory = "all";
     this._advanced = false;
     this._notice = "";
+    this._teachDraft = null;
     this._neuralFrame = 0;
     this._neuralResize = null;
     this._neuralStartedAt = 0;
@@ -105,8 +106,49 @@ class EsterPanel extends HTMLElement {
   async teach() {
     const el = this.shadowRoot?.querySelector("#teach");
     const message = el?.value?.trim();
-    if (!message) return;
-    await this.call("ester", "interpret_message", {message});
+    if (!message || !this._hass || this._busy) return;
+    this._busy = true;
+    this._notice = "Sto capendo quello che mi hai raccontato…";
+    this.render();
+    try {
+      const result = await this._hass.callWS({
+        type:"call_service", domain:"ester", service:"interpret_message",
+        service_data:{message, preview:true}, return_response:true
+      });
+      this._teachDraft = result?.response || result || null;
+      this._notice = this._teachDraft?.summary || "Controlla quello che ho capito prima di salvarlo.";
+    } catch (err) {
+      this._notice = "Non sono riuscita a interpretare il messaggio: " + (err?.message || "errore");
+    } finally {
+      this._busy = false;
+      this.render();
+    }
+  }
+
+  async confirmTeach() {
+    const token = this._teachDraft?.proposal_id;
+    if (!token || !this._hass || this._busy) return;
+    this._busy = true; this._notice = "Sto salvando le conoscenze confermate…"; this.render();
+    try {
+      const result = await this._hass.callWS({
+        type:"call_service", domain:"ester", service:"confirm_teaching",
+        service_data:{proposal_id:token}, return_response:true
+      });
+      const response = result?.response || result || {};
+      this._teachDraft = null;
+      this._notice = response?.summary || "Conoscenze salvate.";
+      await this._hass.callService("ester","evaluate",{});
+    } catch (err) {
+      this._notice = "Non ho salvato nulla: " + (err?.message || "errore");
+    } finally { this._busy=false; this.render(); }
+  }
+
+  async discardTeach() {
+    const token = this._teachDraft?.proposal_id;
+    if (token && this._hass) {
+      try { await this._hass.callService("ester","discard_teaching",{proposal_id:token}); } catch (_) {}
+    }
+    this._teachDraft=null; this._notice="Proposta scartata. Non ho modificato la memoria."; this.render();
   }
 
   async answer(questionId, quickAnswer=null) {
@@ -617,6 +659,30 @@ class EsterPanel extends HTMLElement {
       </article>`;
   }
 
+  teachView() {
+    const s=this.summary();
+    const knowledge=s.knowledge_items || [];
+    const coverage=s.knowledge_coverage || {};
+    const gaps=s.knowledge_gaps || [];
+    const proposal=this._teachDraft;
+    const domains=["presence","climate","lighting","hot_water","energy","ventilation","security","appliances","rooms","other"];
+    const labels={presence:"PRESENZA / FAMIGLIA",climate:"CLIMA",lighting:"LUCI",hot_water:"ACQUA CALDA",energy:"ENERGIA / FV / BATTERIA",ventilation:"VENTILAZIONE",security:"SICUREZZA",appliances:"ELETTRODOMESTICI",rooms:"STANZE",other:"ALTRO"};
+    const grouped={}; for(const k of knowledge){(grouped[k.domain||"other"] ||= []).push(k);}
+    return `
+      ${this.viewHeader("TEACH / 04","INSEGNA","Raccontami liberamente come vivete la casa. Ti mostro cosa ho capito prima di ricordarlo.",String(knowledge.length),"CONOSCENZE")}
+      <section class="command-deck teach-main">
+        <div class="command-head"><span>VOCE / TESTO</span><b>RACCONTA A E.S.T.E.R.</b></div>
+        <p>Non devi usare parole precise. Puoi parlare di più cose insieme: luci, clima, orari, persone, eccezioni e priorità.</p>
+        <div class="command-input"><textarea id="teach" placeholder="Per esempio: «La sera in salotto vogliamo circa 21 gradi. Se non c'è nessuno non serve scaldarlo. Le luci esterne servono quando rientriamo col buio…»"></textarea><button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button><button id="teach-send">${this._busy?"...":"CAPIRE"}</button></div>
+      </section>
+      ${proposal ? `<h2 class="section-title">QUELLO CHE HO CAPITO</h2><article class="control teach-review"><p>${this.esc(proposal.summary||"Controlla questi punti.")}</p><div class="knowledge-list">${(proposal.items||[]).map(x=>`<div class="knowledge-row"><b>${this.esc(labels[x.domain]||this.categoryLabel(x.domain))}</b><span>${this.esc(x.statement)}</span><small>${this.esc((x.kind||"informazione").replaceAll("_"," "))} · ${this.pct(x.confidence)}</small></div>`).join("")||'<div class="empty">Non ho estratto informazioni affidabili.</div>'}</div><div class="button-row"><button id="teach-confirm">CONFERMA E RICORDA</button><button id="teach-discard">SCARTA</button></div><p class="hint">Finché non confermi, la memoria di E.S.T.E.R. non cambia.</p></article>` : ""}
+      <h2 class="section-title">COSA SO GIÀ</h2>
+      <section class="grid">${domains.map(d=>{const items=grouped[d]||[];const cv=coverage[d]||{};return `<article class="control knowledge-domain"><div class="eyebrow">${labels[d]}</div><h3>${items.length ? "Sto imparando" : "Da insegnare"}</h3><p>${this.esc(cv.meaning|| (items.length ? "Ho già alcune informazioni su questo argomento." : "Non mi hai ancora raccontato abbastanza di questo argomento."))}</p>${items.slice(-5).map(x=>`<div class="knowledge-mini">${this.esc(x.statement||x.text||"")}</div>`).join("")}</article>`}).join("")}</section>
+      <h2 class="section-title">COSA MI MANCA</h2>
+      <section class="grid">${gaps.length?gaps.map(g=>`<article class="decision data-gap"><div class="eyebrow">${this.esc(labels[g.domain]||"CASA")}</div><h3>${this.esc(g.title)}</h3><p>${this.esc(g.why)}</p></article>`).join(""):'<div class="empty">Non vedo lacune importanti da chiederti adesso.</div>'}</section>
+    `;
+  }
+
   configView() {
     const weights = ["safety","comfort","cost","energy","equipment","confidence"];
     const defaults = {safety:1,comfort:.75,cost:.6,energy:.65,equipment:.55,confidence:.9};
@@ -734,6 +800,10 @@ class EsterPanel extends HTMLElement {
     if (modeToggle) modeToggle.onclick = () => { this._advanced = !this._advanced; this.render(); };
     const teach = this.shadowRoot?.querySelector("#teach-send");
     if (teach) teach.onclick = () => this.teach();
+    const teachConfirm = this.shadowRoot?.querySelector("#teach-confirm");
+    if (teachConfirm) teachConfirm.onclick = () => this.confirmTeach();
+    const teachDiscard = this.shadowRoot?.querySelector("#teach-discard");
+    if (teachDiscard) teachDiscard.onclick = () => this.discardTeach();
     this.shadowRoot?.querySelectorAll("[data-answer]").forEach(el => el.onclick=()=>this.answer(el.dataset.answer));
     this.shadowRoot?.querySelectorAll("[data-voice-q]").forEach(el => el.onclick=()=>this.speakQuestion(el.dataset.voiceQ));
     this.shadowRoot?.querySelectorAll("[data-quick-q]").forEach(el => el.onclick=()=>this.answer(el.dataset.quickQ, el.dataset.quickAnswer));
@@ -982,7 +1052,7 @@ class EsterPanel extends HTMLElement {
     const thought = this.thoughtState();
 
     const tabs = [
-      ["overview","CORE"],["decisions","DECISIONI"],["questions","DOMANDE"],
+      ["overview","CORE"],["decisions","DECISIONI"],["questions","DOMANDE"],["teach","INSEGNA"],
       ["energy","ENERGIA"],["learning","APPRENDIMENTO"],["validation","VALIDAZIONE"],
       ["migration","MIGRAZIONE"],["config","CONFIG"]
     ];
@@ -1049,6 +1119,8 @@ class EsterPanel extends HTMLElement {
       body = this.viewHeader("DECISION / 02","DECISIONI","Le scelte che E.S.T.E.R. avrebbe eseguito, ordinate per dominio.",this.pct(s.kpis?.avg_confidence),"CONFIDENCE")+'<h2 class="section-title">DECISIONI CHE E.S.T.E.R. AVREBBE PRESO</h2><article class="control decision-explainer"><p>Le decisioni sono raggruppate per tipo, così puoi leggere subito Energia, Clima, Sicurezza, Luci e gli altri domini separatamente.</p><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
     } else if (this._tab === "questions") {
       body = this.viewHeader("QUESTIONS / 03","DOMANDE","Informazioni che E.S.T.E.R. ti chiede per ridurre l'incertezza.",String(questionCount),"APERTE")+'<h2 class="section-title">QUESTION INBOX · DIMMI QUELLO CHE MANCA</h2><article class="control"><p>Le domande sono raggruppate per argomento, così puoi rispondere prima a Energia, Clima, Sicurezza o agli altri gruppi senza mescolare tutto.</p></article>'+this.groupedQuestionCards();
+    } else if (this._tab === "teach") {
+      body = this.teachView();
     } else if (this._tab === "energy") {
       body = this.viewHeader("ENERGY / 04","ENERGIA","Planner integrato FV, rete, batteria, limiti e carichi flessibili.",this.esc((s.daily_forecast?.energy_strategy||"LEARNING").replaceAll("_"," ").toUpperCase()),"STRATEGY")+'<h2 class="section-title">ENERGY MANAGER INTEGRATO</h2>'+this.energyCard()+
         '<h2 class="section-title">ULTIME DECISIONI ENERGIA</h2>'+
@@ -1150,6 +1222,7 @@ class EsterPanel extends HTMLElement {
           .command-deck{padding:12px 8px!important;margin-bottom:16px!important}
           .command-head{flex-direction:column!important;gap:3px!important}
           .command-input textarea{min-height:82px;font-size:16px}
+          .knowledge-row{display:grid;gap:4px;padding:10px 0;border-bottom:1px solid #1cdff322}.knowledge-row span,.knowledge-mini{overflow-wrap:anywhere}.knowledge-row small{color:#68aebb}.knowledge-mini{padding:8px 0;color:#a9d2d9;border-bottom:1px solid #1cdff31a}
           h2.section-title{margin:20px 0 10px!important;font-size:11px!important;letter-spacing:.16em!important}
           input,select,textarea,button{max-width:100%}
           pre,.code,.technical{max-width:100%;overflow-x:auto;white-space:pre-wrap;overflow-wrap:anywhere}
