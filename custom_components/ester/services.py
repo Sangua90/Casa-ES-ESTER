@@ -22,6 +22,7 @@ from .usage import validate_profile
 from .questions import apply_answer
 from .language_pipeline import interpret_and_store
 from .language import store_teaching_items
+from .knowledge_files import parse_documents, additions, append_documents
 from .snapshots import create_snapshot, restore_snapshot, portable_memory
 from .replay import run_historical_replay
 from .scenario import simulate_scenario
@@ -243,6 +244,23 @@ def register_services(hass):
         except Exception:
             raise HomeAssistantError("Natural-language interpretation failed; no memory was changed") from None
 
+    async def preview_knowledge_files(call):
+        coordinator = runtime()
+        try:
+            items = parse_documents(json.loads(call.data["files_json"]))
+            async with coordinator.storage.lock:
+                new = additions(coordinator.storage.data.get("knowledge", []), items)
+                proposal = {"proposal_id": str(uuid4()), "created_at": dt_util.utcnow().isoformat(),
+                            "source": "knowledge_files", "provider": "local", "items": new,
+                            "summary": f"{len(new)} nuove informazioni da aggiungere; {len(items)-len(new)} duplicati ignorati. Nessuna sostituzione."}
+                pending = coordinator.storage.data.setdefault("pending_teachings", [])
+                pending.append(proposal)
+                del pending[:-20]
+                await coordinator.storage.async_save()
+            return {**proposal, "memory_changed": False, "device_action": False}
+        except (ValueError, TypeError) as err:
+            raise ServiceValidationError(str(err)) from None
+
     async def confirm_teaching(call):
         coordinator=runtime()
         proposal_id=call.data["proposal_id"]
@@ -251,7 +269,12 @@ def register_services(hass):
             proposal=next((p for p in pending if p.get("proposal_id")==proposal_id),None)
             if proposal is None: raise ServiceValidationError("Unknown or expired teaching proposal")
             checkpoint(coordinator,"Prima di confermare insegnamento",proposal.get("original_text","")[:200])
-            saved=store_teaching_items(coordinator.storage.data,proposal,dt_util.utcnow())
+            try:
+                saved = (append_documents(coordinator.storage.data, proposal, dt_util.utcnow())
+                         if proposal.get("source") == "knowledge_files" else
+                         store_teaching_items(coordinator.storage.data,proposal,dt_util.utcnow()))
+            except ValueError as err:
+                raise ServiceValidationError(str(err)) from None
             coordinator.storage.data["pending_teachings"]=[p for p in pending if p.get("proposal_id")!=proposal_id]
             await coordinator.storage.async_save()
         await coordinator.async_request_refresh()
@@ -483,6 +506,7 @@ def register_services(hass):
         "confirm_teaching": (confirm_teaching, {vol.Required("proposal_id"): SHORT}),
         "discard_teaching": (discard_teaching, {vol.Required("proposal_id"): SHORT}),
         "export_memory": (export_memory, {}),
+        "preview_knowledge_files": (preview_knowledge_files, {vol.Required("files_json"): LONG_TEXT}),
         "set_flexible_load": (set_flexible_load, {
             vol.Optional("load_id"): SHORT,
             vol.Required("name"): SHORT,
@@ -527,4 +551,4 @@ def register_services(hass):
     }
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
-            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "confirm_teaching", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)
+            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "preview_knowledge_files", "confirm_teaching", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)

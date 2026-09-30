@@ -387,3 +387,14 @@ import_memory:
       selector:
         text:
           multiline: true
+
+preview_knowledge_files:
+  name: "Anteprima conoscenze da file"
+  description: "Prepara un'aggiunta di conoscenze senza sostituire la memoria. Confermare con confirm_teaching."
+  fields:
+    files_json:
+      required: true
+      name: "Documenti JSON"
+      selector:
+        text:
+          multiline: true
