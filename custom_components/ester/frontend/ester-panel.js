@@ -6,6 +6,7 @@ class EsterPanel extends HTMLElement {
     this._busy = false;
     this._tab = "overview";
     this._decisionCategory = "all";
+    this._advanced = false;
     this._notice = "";
   }
 
@@ -287,6 +288,35 @@ class EsterPanel extends HTMLElement {
     await this.call("ester","remove_flexible_load",{load_id});
   }
 
+  confidenceLabel(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "ANCORA DA VALUTARE";
+    if (n >= .9) return "MOLTO SICURA";
+    if (n >= .8) return "SICURA";
+    if (n >= .65) return "ABBASTANZA SICURA";
+    if (n >= .5) return "INCERTA";
+    return "POCO SICURA";
+  }
+
+  confidenceMeaning(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "Non ho ancora abbastanza dati.";
+    if (n >= .9) return "Ho molti dati coerenti per questa scelta.";
+    if (n >= .8) return "I dati disponibili supportano bene questa scelta.";
+    if (n >= .65) return "La scelta è plausibile, ma voglio ancora verificarla.";
+    if (n >= .5) return "Ci sono ancora elementi che possono cambiare la decisione.";
+    return "Non userei ancora questa decisione in automatico.";
+  }
+
+  migrationMeaning(status) {
+    const s = String(status || "observe");
+    if (s === "candidate_for_manual_migration") return "QUASI PRONTA DA SOSTITUIRE";
+    if (s === "validate") return "DA CONTROLLARE ANCORA";
+    if (s === "needs_validation") return "NON ANCORA AFFIDABILE";
+    if (s === "needs_data") return "MANCANO DATI";
+    return "CONTINUA A OSSERVARE";
+  }
+
   categoryLabel(category) {
     const labels = {
       energy:"ENERGIA", climate:"CLIMA", hot_water:"ACQUA CALDA", ventilation:"VENTILAZIONE",
@@ -322,7 +352,7 @@ class EsterPanel extends HTMLElement {
     let list = (items || this.realDecisions()).slice().reverse();
     if (!items && this._decisionCategory !== "all") list = list.filter(x=>x.category===this._decisionCategory);
     list = list.slice(0, 100);
-    if (!list.length) return '<div class="empty">Non ci sono ancora vere decisioni Shadow da mostrare. Le richieste di configurazione sono nella sezione DATI MANCANTI.</div>';
+    if (!list.length) return '<div class="empty">Non ci sono ancora decisioni vere da mostrare.</div>';
     return list.map(d => {
       const objective = d.evidence?.objective_score?.score;
       const readiness = d.evidence?.objective_score?.execution_readiness;
@@ -330,19 +360,26 @@ class EsterPanel extends HTMLElement {
       <article class="decision true-decision">
         <div class="decision-head">
           <div>
-            <div class="eyebrow">${this.esc((d.category || "decision").toUpperCase())} · SHADOW</div>
+            <div class="eyebrow">${this.esc(this.categoryLabel(d.category))}</div>
             <h3>${this.esc(d.title)}</h3>
           </div>
-          <div class="confidence-block"><span>SICUREZZA</span><b>${this.pct(d.confidence)}</b></div>
+          <div class="simple-confidence">
+            <b>${this.esc(this.confidenceLabel(d.confidence))}</b>
+            <span>${this.pct(d.confidence)}</span>
+          </div>
         </div>
-        <div class="meter"><span style="width:${Math.max(0, Math.min(100, Number(d.confidence || 0) * 100))}%"></span></div>
-        <div class="decision-section"><span>COSA AVREBBE FATTO</span><strong>${this.esc(d.proposed_action)}</strong></div>
+        <div class="decision-section primary"><span>E.S.T.E.R. AVREBBE FATTO</span><strong>${this.esc(d.proposed_action)}</strong></div>
         <div class="decision-section"><span>PERCHÉ</span><p>${this.esc(d.reasoning)}</p></div>
-        <div class="meta">
-          <span>RISCHIO ${this.esc((d.risk || "—").toUpperCase())}</span>
-          <span>PRIORITÀ ${objective == null ? "—" : this.pct(objective)}</span>
-          <span>READINESS ${readiness == null ? "—" : this.pct(readiness)}</span>
-        </div>
+        <div class="plain-explain">${this.esc(this.confidenceMeaning(d.confidence))}</div>
+        ${this._advanced ? `
+          <details class="tech-details" open>
+            <summary>DETTAGLI TECNICI</summary>
+            <div class="meta">
+              <span>RISCHIO ${this.esc((d.risk || "—").toUpperCase())}</span>
+              <span>PRIORITÀ ${objective == null ? "—" : this.pct(objective)}</span>
+              <span>READINESS ${readiness == null ? "—" : this.pct(readiness)}</span>
+            </div>
+          </details>` : ''}
       </article>`;
     }).join("");
   }
@@ -402,71 +439,115 @@ class EsterPanel extends HTMLElement {
     }).join("");
   }
 
+  viewHeader(code, title, subtitle, metric="SHADOW", metricLabel="MODE") {
+    return `
+      <section class="view-hud-head">
+        <div class="mini-reactor">
+          <div class="mini-ring a"></div><div class="mini-ring b"></div><div class="mini-ring c"></div>
+          <div class="mini-core"></div>
+        </div>
+        <div class="view-copy">
+          <div class="hud-label">${this.esc(code)}</div>
+          <h1 class="view-title">${this.esc(title)}</h1>
+          <p>${this.esc(subtitle)}</p>
+        </div>
+        <div class="view-metric">
+          <span>${this.esc(metricLabel)}</span>
+          <b>${this.esc(metric)}</b>
+          <i></i>
+        </div>
+      </section>`;
+  }
+
+  hudGauge(label, value, detail="") {
+    const n = Number(value);
+    const pct = Number.isFinite(n) ? Math.max(0,Math.min(100,Math.round(n*100))) : 0;
+    return `<div class="hud-gauge" style="--pct:${pct}">
+      <div class="gauge-face"><b>${Number.isFinite(n)?pct+"%":"—"}</b><span>${this.esc(label)}</span></div>
+      ${detail ? '<small>'+this.esc(detail)+'</small>' : ''}
+    </div>`;
+  }
+
   energyCard() {
     const d = this.latest().slice().reverse().find(x => x.category === "energy");
-    if (!d) return '<div class="empty">Il planner energia non ha ancora una decisione completa.</div>';
+    if (!d) return '<div class="empty">E.S.T.E.R. sta ancora raccogliendo i dati necessari per il piano energia.</div>';
     const p = d.evidence?.energy_plan || {};
     const managed = d.evidence?.managed_load_plan || [];
+    const surplus = Number(p.instant_surplus_w);
+    const summary = Number.isFinite(surplus)
+      ? (surplus > 300 ? "In questo momento hai energia disponibile oltre al consumo della casa." :
+         surplus < 50 ? "In questo momento non c'è un surplus FV significativo." :
+         "Il bilancio energetico è quasi in equilibrio.")
+      : "Sto ancora completando il bilancio energetico.";
     return `
-      <article class="energy-core">
-        <div class="orb"><div class="orb-core"></div></div>
+      <article class="energy-core hud-panel">
+        <div class="energy-reactor"><div class="energy-ring er1"></div><div class="energy-ring er2"></div><div class="energy-core-dot"></div><span>${this.esc(p.battery_soc ?? "—")}%</span></div>
         <div class="energy-data">
-          <div class="eyebrow">LOCAL ENERGY CORE</div>
-          <h2>${this.esc((p.strategy || "learning").replaceAll("_"," ").toUpperCase())}</h2>
-          <div class="metrics">
-            <div><b>${this.esc(p.pv_w ?? "—")}</b><span>FV W</span></div>
-            <div><b>${this.esc(p.load_w ?? "—")}</b><span>CASA W</span></div>
-            <div><b>${this.esc(p.battery_soc ?? "—")}%</b><span>SOC</span></div>
-            <div><b>${this.esc(p.instant_surplus_w ?? "—")}</b><span>SURPLUS W</span></div>
+          <div class="eyebrow">SITUAZIONE ENERGIA</div>
+          <h2>${this.esc(summary)}</h2>
+          <div class="metrics human-metrics">
+            <div><b>${this.esc(p.pv_w ?? "—")} W</b><span>STA PRODUCENDO IL FV</span></div>
+            <div><b>${this.esc(p.load_w ?? "—")} W</b><span>STA USANDO LA CASA</span></div>
+            <div><b>${this.esc(p.battery_soc ?? "—")}%</b><span>BATTERIA DISPONIBILE</span></div>
+            <div><b>${this.esc(p.instant_surplus_w ?? "—")} W</b><span>ENERGIA IN PIÙ</span></div>
           </div>
-          <p>${this.esc(d.reasoning)}</p>
-          <div class="meta"><span>CARICHI GESTITI ${managed.length}</span><span>COMANDI REALI 0</span></div>
+          <div class="decision-section primary"><span>E.S.T.E.R. AVREBBE FATTO</span><strong>${this.esc(d.proposed_action)}</strong></div>
+          <div class="decision-section"><span>PERCHÉ</span><p>${this.esc(d.reasoning)}</p></div>
+          ${this._advanced ? `<details class="tech-details" open><summary>DETTAGLI TECNICI</summary><pre>${this.esc(JSON.stringify({energy_plan:p,managed_loads:managed},null,2)).slice(0,4000)}</pre></details>` : ''}
         </div>
       </article>
-      ${managed.length ? '<h2 class="section-title">PIANO CARICHI</h2><section class="grid">' + managed.slice(0,20).map(x=>`
+      ${managed.length ? '<h2 class="section-title">CARICHI CHE E.S.T.E.R. STA VALUTANDO</h2><section class="grid">' + managed.slice(0,20).map(x=>`
         <article class="decision">
-          <div class="eyebrow">${this.esc(x.phase || "unknown")} · PRIORITÀ ${this.esc(x.priority)}</div>
-          <h3>${this.esc(x.name)}</h3>
-          <div class="proposal">${this.esc((x.shadow_action || "").replaceAll("_"," ").toUpperCase())}</div>
+          <div class="eyebrow">${this.esc(x.name)}</div>
+          <div class="decision-section primary"><span>COSA FAREBBE</span><strong>${this.esc((x.shadow_action || "").replaceAll("_"," "))}</strong></div>
           <p>${this.esc(x.shadow_reason)}</p>
-          <div class="meta"><span>${this.esc(x.power_w)} W</span><span>${this.esc(x.estimated_energy_kwh)} kWh</span></div>
+          ${this._advanced ? '<div class="meta"><span>'+this.esc(x.power_w)+' W</span><span>'+this.esc(x.estimated_energy_kwh)+' kWh</span><span>'+this.esc(x.phase||"")+'</span></div>' : ''}
         </article>`).join("") + '</section>' : ''}
     `;
   }
 
   migrationCards() {
     const items = Object.entries(this.migration());
-    if (!items.length) return '<div class="empty">Nessuna automazione legacy classificata.</div>';
+    if (!items.length) return '<div class="empty">Non ho ancora automazioni legacy da confrontare.</div>';
     return items.map(([name,x]) => `
-      <article class="migration">
-        <div class="decision-head">
-          <div><div class="eyebrow">LEGACY DOMAIN</div><h3>${this.esc(name.toUpperCase())}</h3></div>
-          <span class="status">${this.esc(x.status || "observe")}</span>
+      <article class="migration hud-panel">
+        <div class="panel-orbit"><div class="panel-ring"></div><b>${this.esc(x.shadow_decisions_checked ?? 0)}</b><span>PROVE</span></div>
+        <div class="panel-body">
+          <div class="eyebrow">${this.esc(this.categoryLabel(name))}</div>
+          <h3>${this.esc(this.migrationMeaning(x.status))}</h3>
+          <p>${x.status==="candidate_for_manual_migration"
+              ? "E.S.T.E.R. ha già abbastanza confronti per valutare una sostituzione manuale."
+              : "Per ora terrei attive le automazioni esistenti mentre E.S.T.E.R. continua a confrontarsi con loro."}</p>
+          <div class="plain-explain">Automazioni attuali: ${this.esc(x.legacy_automations ?? 0)} · Domande ancora aperte: ${this.esc(x.open_questions ?? 0)}</div>
+          ${this._advanced ? `<details class="tech-details" open><summary>DETTAGLI TECNICI</summary><pre>${this.esc(JSON.stringify(x,null,2))}</pre></details>` : ''}
         </div>
-        <div class="metrics compact">
-          <div><b>${this.esc(x.legacy_automations ?? 0)}</b><span>AUTOMAZIONI</span></div>
-          <div><b>${this.esc(x.shadow_decisions_checked ?? 0)}</b><span>DECISIONI</span></div>
-          <div><b>${this.esc(x.open_questions ?? 0)}</b><span>DOMANDE</span></div>
-          <div><b>${x.empirical_feedback_score == null ? "—" : this.pct(x.empirical_feedback_score)}</b><span>FEEDBACK</span></div>
-        </div>
-        <div class="meta"><span>DISATTIVAZIONE AUTOMATICA</span><span>NO</span></div>
-      </article>
-    `).join("");
+      </article>`).join("");
   }
 
   learningCards() {
     const s = this.summary();
     const groups = [
-      ["THERMAL",s.thermal_models||{}],["VENTILATION",s.ventilation_models||{}],
-      ["HOT WATER",s.hot_water_models||{}],["OCCUPANCY",s.occupancy_models||{}]
+      ["CLIMA STANZE",s.thermal_models||{},"quanto velocemente si scaldano o raffreddano le stanze"],
+      ["VENTILAZIONE",s.ventilation_models||{},"quanto serve davvero accendere le ventole"],
+      ["ACQUA CALDA",s.hot_water_models||{},"come cala e recupera la temperatura del boiler"],
+      ["PRESENZA",s.occupancy_models||{},"quando è probabile che gli ambienti vengano usati"]
     ];
-    return groups.map(([label,data]) => `
-      <article class="model">
-        <div class="eyebrow">${label}</div>
-        <h3>${Object.keys(data).length} modelli</h3>
-        <pre>${this.esc(JSON.stringify(data,null,2)).slice(0,1800)}</pre>
-      </article>
-    `).join("");
+    return groups.map(([label,data,desc]) => {
+      const vals = Object.values(data).map(x=>Number(x?.confidence)).filter(Number.isFinite);
+      const avg = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+      const enough = avg != null && avg >= .65;
+      return `
+        <article class="model hud-panel">
+          <div class="panel-orbit"><div class="panel-ring"></div><b>${enough?"OK":"…"}</b><span>${enough?"DATI SUFFICIENTI":"STO IMPARANDO"}</span></div>
+          <div class="panel-body">
+            <div class="eyebrow">${this.esc(label)}</div>
+            <h3>${enough ? "Ho già una base utile" : "Mi servono ancora osservazioni"}</h3>
+            <p>Sto imparando ${this.esc(desc)}.</p>
+            <div class="plain-explain">${avg==null?"Non ho ancora abbastanza esempi.":this.confidenceMeaning(avg)}</div>
+            ${this._advanced ? `<details class="tech-details" open><summary>DETTAGLI TECNICI</summary><pre>${this.esc(JSON.stringify(data,null,2)).slice(0,3000)}</pre></details>` : ''}
+          </div>
+        </article>`;
+    }).join("");
   }
 
   validationView() {
@@ -476,68 +557,43 @@ class EsterPanel extends HTMLElement {
     const replay = s.last_replay || {};
     const scenario = s.last_scenario || {};
     const anomalies = s.anomalies || [];
+    const ready = !!h.overall_ready_for_executor;
     return `
-      <h2 class="section-title">AUTONOMY HEALTH</h2>
-      <article class="health ${h.overall_ready_for_executor ? "ok" : "warn"}">
-        <div class="decision-head">
-          <div>
-            <div class="eyebrow">PRE-AUTONOMY GATE</div>
-            <h2>${h.overall_ready_for_executor ? "READY FOR FINAL VALIDATION" : "SHADOW STILL REQUIRED"}</h2>
-          </div>
-          <div class="confidence">${h.feedback_quality == null ? "—" : this.pct(h.feedback_quality)}</div>
-        </div>
-        <p>Blocchi: ${this.esc((h.blocking_reasons || []).join(", ") || "nessuno")}</p>
-        <div class="meta"><span>EXECUTOR PRESENTE</span><span>NO</span></div>
+      ${this.viewHeader("VALIDATION / 06","VALIDAZIONE","Qui vedi in parole semplici se E.S.T.E.R. ha già imparato abbastanza.", ready?"QUASI PRONTA":"NON ANCORA","STATO")}
+      <article class="health ${ready?"ok":"warn"}">
+        <div class="decision-section primary"><span>POSSO TOGLIERE SHADOW?</span><strong>${ready?"I DATI SONO ABBASTANZA SOLIDI PER LA VALIDAZIONE FINALE":"NO, CONTINUEREI ANCORA IN SHADOW"}</strong></div>
+        <p>${ready
+            ? "I domini principali hanno dati e feedback sufficienti. L'esecuzione reale comunque non è ancora attiva."
+            : "Ci sono ancora aree che devono essere osservate o confermate prima di affidare azioni reali a E.S.T.E.R."}</p>
+        <div class="plain-explain">${(h.blocking_reasons||[]).length ? "Da completare: "+this.esc((h.blocking_reasons||[]).map(x=>this.categoryLabel(x)).join(", ")) : "Nessun blocco principale rilevato."}</div>
       </article>
 
-      <h2 class="section-title">KPI SHADOW</h2>
-      <section class="stats">
-        <div><b>${this.esc(k.decisions ?? 0)}</b><span>DECISIONI</span></div>
-        <div><b>${k.avg_confidence == null ? "—" : this.pct(k.avg_confidence)}</b><span>CONFIDENCE MEDIA</span></div>
-        <div><b>${k.feedback?.quality_score == null ? "—" : this.pct(k.feedback.quality_score)}</b><span>QUALITÀ FEEDBACK</span></div>
-        <div><b>${this.esc(k.open_questions ?? 0)}</b><span>DOMANDE APERTE</span></div>
+      <h2 class="section-title">COME STA ANDANDO</h2>
+      <section class="simple-status-grid">
+        <div><b>${this.esc(k.decisions ?? 0)}</b><span>decisioni osservate</span></div>
+        <div><b>${k.avg_confidence == null ? "—" : this.pct(k.avg_confidence)}</b><span>sicurezza media</span></div>
+        <div><b>${k.feedback?.quality_score == null ? "—" : this.pct(k.feedback.quality_score)}</b><span>feedback positivi</span></div>
+        <div><b>${this.esc(k.open_questions ?? 0)}</b><span>domande ancora aperte</span></div>
       </section>
 
-      <h2 class="section-title">REPLAY STORICO</h2>
+      <h2 class="section-title">PROVA SULLO STORICO</h2>
       <article class="control">
-        <p>Rigioca Recorder con il motore Shadow attuale. Non modifica dispositivi né storico.</p>
-        <div class="button-row">
-          <button data-replay="7">REPLAY 7 GIORNI</button>
-          <button data-replay="30">REPLAY 30 GIORNI</button>
-        </div>
-        <div class="metrics compact">
-          <div><b>${this.esc(replay.checkpoints ?? "—")}</b><span>CHECKPOINT</span></div>
-          <div><b>${this.esc(replay.decisions ?? "—")}</b><span>DECISIONI</span></div>
-          <div><b>${replay.avg_checkpoint_confidence == null ? "—" : this.pct(replay.avg_checkpoint_confidence)}</b><span>CONFIDENCE</span></div>
-          <div><b>${this.esc(replay.needs_input ?? "—")}</b><span>INPUT NECESSARI</span></div>
-        </div>
+        <p>Puoi farle rileggere il passato per vedere cosa avrebbe deciso, senza aspettare settimane.</p>
+        <div class="button-row"><button data-replay="7">ULTIMA SETTIMANA</button><button data-replay="30">ULTIMO MESE</button><button data-replay="56">ULTIME 8 SETTIMANE</button></div>
+        ${replay.checkpoints ? `<div class="plain-explain">Ultima prova: ${this.esc(replay.decisions)} decisioni simulate · sicurezza media ${this.pct(replay.avg_checkpoint_confidence)} · ${this.esc(replay.needs_input)} casi in cui avrebbe chiesto aiuto.</div>` : ''}
+        ${this._advanced ? `<details class="tech-details"><summary>DETTAGLI TECNICI REPLAY</summary><pre>${this.esc(JSON.stringify(replay,null,2)).slice(0,3500)}</pre></details>` : ''}
       </article>
 
-      <h2 class="section-title">WHAT-IF</h2>
+      <h2 class="section-title">SIMULA UNA GIORNATA DIVERSA</h2>
       <article class="control">
-        <div class="form-grid">
-          <label>Delta comfort °C<input id="scenario-comfort" type="number" step="0.5" value="0"></label>
-          <label>Moltiplicatore costo energia<input id="scenario-price" type="number" step="0.1" value="1"></label>
-        </div>
-        <div class="button-row">
-          <button data-scenario="normal">NORMALE</button>
-          <button data-scenario="vacation">VACANZA</button>
-          <button data-scenario="guests">OSPITI</button>
-          <button data-scenario="illness">MALATTIA</button>
-          <button data-scenario="work_from_home">CASA/LAVORO</button>
-        </div>
-        <p>Ultimo scenario: ${this.esc(scenario.mode || "—")} · ${this.esc(scenario.decision_count ?? "—")} decisioni</p>
+        <p>Serve per vedere come cambierebbero le decisioni se foste in vacanza, aveste ospiti o cambiasse il costo dell'energia.</p>
+        <div class="button-row"><button data-scenario="normal">GIORNATA NORMALE</button><button data-scenario="vacation">VACANZA</button><button data-scenario="guests">OSPITI</button><button data-scenario="illness">MALATTIA</button><button data-scenario="work_from_home">CASA/LAVORO</button></div>
+        ${scenario.mode ? `<div class="plain-explain">Ultima simulazione: ${this.esc(scenario.mode)} · ${this.esc(scenario.decision_count)} decisioni previste.</div>` : ''}
       </article>
 
-      <h2 class="section-title">ANOMALIE</h2>
-      <section class="grid">
-        ${anomalies.length ? anomalies.slice(0,30).map(a=>`
-          <article class="decision">
-            <div class="eyebrow">${this.esc(a.severity)} · ${this.esc(a.kind)}</div>
-            <h3>${this.esc(a.entity_id)}</h3>
-            <p>${this.esc(a.message)}</p>
-          </article>`).join("") : '<div class="empty">Nessuna anomalia rilevata.</div>'}
-      </section>
+      <h2 class="section-title">COSE DA CONTROLLARE</h2>
+      <section class="grid">${anomalies.length ? anomalies.slice(0,20).map(a=>`
+        <article class="decision"><div class="eyebrow">${this.esc(a.entity_id)}</div><h3>${this.esc(a.message)}</h3><p>Questo dato potrebbe ridurre l'affidabilità delle decisioni finché non viene verificato.</p></article>`).join("") : '<div class="empty">Non vedo problemi importanti nei sensori osservati.</div>'}</section>
     `;
   }
 
@@ -545,11 +601,12 @@ class EsterPanel extends HTMLElement {
     const f = this.summary().daily_forecast || {};
     const uses = f.next_uses || [];
     return `
-      <article class="control">
-        <div class="eyebrow">DAILY HOME FORECAST</div>
-        <h3>${this.esc((f.season || "—").toUpperCase())} · ${this.pct(f.avg_recent_confidence)}</h3>
-        <p>Strategia energia: <b>${this.esc((f.energy_strategy || "—").replaceAll("_"," "))}</b> · Domande aperte: ${this.esc(f.open_questions ?? 0)} · Anomalie: ${this.esc(f.anomalies ?? 0)}</p>
-        ${uses.length ? '<div class="timeline">'+uses.slice(0,8).map(u=>`<div><b>${this.esc(u.area_id)}</b><span>${this.esc(u.label || "")} · tra ${this.esc(u.minutes_until)} min · ${u.comfort_c == null ? "—" : this.esc(u.comfort_c)+" °C"}</span></div>`).join("")+'</div>' : '<div class="empty">Nessun uso stanza previsto nelle prossime ore.</div>'}
+      <article class="control forecast-simple">
+        <div class="eyebrow">OGGI</div>
+        <h3>${uses.length ? "Ecco cosa mi aspetto nelle prossime ore" : "Non ho utilizzi particolari previsti"}</h3>
+        <p>${f.energy_strategy ? "Per l'energia la strategia prevista è: "+this.esc(String(f.energy_strategy).replaceAll("_"," "))+"." : "Sto ancora costruendo il piano energia della giornata."}</p>
+        ${uses.length ? '<div class="timeline">'+uses.slice(0,8).map(u=>`<div><b>${this.esc(u.area_id)}</b><span>${this.esc(u.label || "uso previsto")} · tra ${this.esc(u.minutes_until)} min${u.comfort_c==null?"":" · "+this.esc(u.comfort_c)+" °C"}</span></div>`).join("")+'</div>' : ''}
+        ${this._advanced ? `<details class="tech-details"><summary>DETTAGLI TECNICI</summary><pre>${this.esc(JSON.stringify(f,null,2)).slice(0,2500)}</pre></details>` : ''}
       </article>`;
   }
 
@@ -562,6 +619,7 @@ class EsterPanel extends HTMLElement {
     const loads = this.summary().flexible_loads || [];
     const gaps = this.state("sensor.e_s_t_e_r_data_suggestions")?.attributes?.items || [];
     return `
+      ${this.viewHeader("CONFIG / 08","CONFIGURAZIONE","Routine, carichi, mappature, pesi decisionali e memoria.","ADMIN","ACCESS")}
       <h2 class="section-title">PESI MULTI-OBIETTIVO</h2>
       <section class="grid">
         ${weights.map(w=>`
@@ -665,6 +723,8 @@ class EsterPanel extends HTMLElement {
     this.shadowRoot?.querySelectorAll("[data-tab]").forEach(el => {
       el.onclick = () => { this._tab = el.dataset.tab; this.render(); };
     });
+    const modeToggle = this.shadowRoot?.querySelector("#mode-toggle");
+    if (modeToggle) modeToggle.onclick = () => { this._advanced = !this._advanced; this.render(); };
     const teach = this.shadowRoot?.querySelector("#teach-send");
     if (teach) teach.onclick = () => this.teach();
     this.shadowRoot?.querySelectorAll("[data-answer]").forEach(el => el.onclick=()=>this.answer(el.dataset.answer));
@@ -694,6 +754,21 @@ class EsterPanel extends HTMLElement {
     if (filter) filter.onchange=()=>{this._decisionCategory=filter.value;this.render();};
   }
 
+  thoughtState() {
+    const s = this.summary();
+    const q = Number(this.state("sensor.e_s_t_e_r_questions")?.state || 0);
+    const replay = s.last_replay || {};
+    const anomalies = s.anomalies || [];
+    const decisions = this.latest();
+    const newest = decisions[decisions.length-1];
+
+    if (replay.status === "running") return {mode:"replay",label:"RILEGGO IL PASSATO",detail:"Sto confrontando lo storico con ciò che avrei deciso oggi.",pulse:"fast"};
+    if (anomalies.length) return {mode:"alert",label:"STO VERIFICANDO",detail:"Ho trovato dati che meritano controllo.",pulse:"alert"};
+    if (q > 0) return {mode:"waiting",label:"MI MANCA UN'INFORMAZIONE",detail:"Sto aspettando una tua risposta per decidere meglio.",pulse:"slow"};
+    if (newest) return {mode:"thinking",label:"STO RAGIONANDO",detail:"Sto confrontando stato attuale, abitudini, costi e sicurezza.",pulse:"normal"};
+    return {mode:"observing",label:"STO OSSERVANDO",detail:"Raccolgo dati e imparo il comportamento della casa.",pulse:"slow"};
+  }
+
   render() {
     if (!this.shadowRoot) return;
     const s = this.summary();
@@ -702,6 +777,7 @@ class EsterPanel extends HTMLElement {
     const questionCount = this.state("sensor.e_s_t_e_r_questions")?.state || "0";
     const observed = this.state("sensor.e_s_t_e_r_observed_entities")?.state || "0";
     const health = s.autonomy_health || {};
+    const thought = this.thoughtState();
 
     const tabs = [
       ["overview","CORE"],["decisions","DECISIONI"],["questions","DOMANDE"],
@@ -718,18 +794,28 @@ class EsterPanel extends HTMLElement {
             <div class="hud-label">SYSTEM / 01</div>
             <div class="hud-value">${this.esc(status.toUpperCase())}</div>
             <div class="hud-line"></div>
-            <div class="tele-row"><span>NODI</span><b>${this.esc(observed)}</b></div>
+            <div class="tele-row"><span>STATO</span><b>${this.esc(thought.label)}</b></div>
             <div class="tele-row"><span>DECISIONI</span><b>${this.esc(decisionCount)}</b></div>
             <div class="tele-row"><span>DOMANDE</span><b>${this.esc(questionCount)}</b></div>
             <div class="tele-row"><span>ATTUAZIONI</span><b>0</b></div>
           </div>
 
-          <div class="jarvis">
+          <div class="jarvis thought-core ${this.esc(thought.pulse)}" data-mode="${this.esc(thought.mode)}">
             <div class="ring r0"></div><div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
             <div class="tick-ring"></div>
-            <div class="core-letter">E</div>
+            <div class="thought-field">
+              <div class="thought-wave w1"></div>
+              <div class="thought-wave w2"></div>
+              <div class="thought-wave w3"></div>
+              <div class="thought-node n1"></div>
+              <div class="thought-node n2"></div>
+              <div class="thought-node n3"></div>
+              <div class="thought-node n4"></div>
+              <div class="thought-brain"></div>
+            </div>
             <div class="scan-line"></div>
-            <div class="core-caption">HOME INTELLIGENCE CORE</div>
+            <div class="thought-label">${this.esc(thought.label)}</div>
+            <div class="thought-detail">${this.esc(thought.detail)}</div>
           </div>
 
           <div class="telemetry right">
@@ -766,19 +852,19 @@ class EsterPanel extends HTMLElement {
       `;
     } else if (this._tab === "decisions") {
       const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety"];
-      body = '<h2 class="section-title">DECISIONI CHE E.S.T.E.R. AVREBBE PRESO</h2><article class="control decision-explainer"><p>Le decisioni sono raggruppate per tipo, così puoi leggere subito Energia, Clima, Sicurezza, Luci e gli altri domini separatamente.</p><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
+      body = this.viewHeader("DECISION / 02","DECISIONI","Le scelte che E.S.T.E.R. avrebbe eseguito, ordinate per dominio.",this.pct(s.kpis?.avg_confidence),"CONFIDENCE")+'<h2 class="section-title">DECISIONI CHE E.S.T.E.R. AVREBBE PRESO</h2><article class="control decision-explainer"><p>Le decisioni sono raggruppate per tipo, così puoi leggere subito Energia, Clima, Sicurezza, Luci e gli altri domini separatamente.</p><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
     } else if (this._tab === "questions") {
-      body = '<h2 class="section-title">QUESTION INBOX · DIMMI QUELLO CHE MANCA</h2><article class="control"><p>Le domande sono raggruppate per argomento, così puoi rispondere prima a Energia, Clima, Sicurezza o agli altri gruppi senza mescolare tutto.</p></article>'+this.groupedQuestionCards();
+      body = this.viewHeader("QUESTIONS / 03","DOMANDE","Informazioni che E.S.T.E.R. ti chiede per ridurre l'incertezza.",String(questionCount),"APERTE")+'<h2 class="section-title">QUESTION INBOX · DIMMI QUELLO CHE MANCA</h2><article class="control"><p>Le domande sono raggruppate per argomento, così puoi rispondere prima a Energia, Clima, Sicurezza o agli altri gruppi senza mescolare tutto.</p></article>'+this.groupedQuestionCards();
     } else if (this._tab === "energy") {
-      body = '<h2 class="section-title">ENERGY MANAGER INTEGRATO</h2>'+this.energyCard()+
+      body = this.viewHeader("ENERGY / 04","ENERGIA","Planner integrato FV, rete, batteria, limiti e carichi flessibili.",this.esc((s.daily_forecast?.energy_strategy||"LEARNING").replaceAll("_"," ").toUpperCase()),"STRATEGY")+'<h2 class="section-title">ENERGY MANAGER INTEGRATO</h2>'+this.energyCard()+
         '<h2 class="section-title">ULTIME DECISIONI ENERGIA</h2>'+
         this.groupedDecisionCards(this.realDecisions().filter(x=>x.category==="energy"));
     } else if (this._tab === "learning") {
-      body = '<h2 class="section-title">MODELLI APPRESI</h2><section class="grid">'+this.learningCards()+'</section>';
+      body = this.viewHeader("LEARNING / 05","APPRENDIMENTO","Modelli locali costruiti dallo storico reale della casa.",String((Object.keys(s.thermal_models||{}).length+Object.keys(s.occupancy_models||{}).length+Object.keys(s.hot_water_models||{}).length+Object.keys(s.ventilation_models||{}).length)),"MODELLI")+'<h2 class="section-title">MODELLI APPRESI</h2><section class="grid">'+this.learningCards()+'</section>';
     } else if (this._tab === "validation") {
       body = this.validationView();
     } else if (this._tab === "migration") {
-      body = '<h2 class="section-title">MIGRAZIONE AUTOMAZIONI</h2><section class="grid">'+this.migrationCards()+'</section>';
+      body = this.viewHeader("MIGRATION / 07","MIGRAZIONE","Confronto tra logiche legacy e comportamento Shadow E.S.T.E.R.",String(Object.keys(this.migration()).length),"DOMINI")+'<h2 class="section-title">MIGRAZIONE AUTOMAZIONI</h2><section class="grid">'+this.migrationCards()+'</section>';
     } else if (this._tab === "config") {
       body = this.configView();
     }
@@ -793,7 +879,9 @@ class EsterPanel extends HTMLElement {
 .jarvis-stage{min-height:430px;position:relative;display:grid;grid-template-columns:minmax(210px,1fr) minmax(300px,460px) minmax(210px,1fr);align-items:center;gap:26px;overflow:hidden;border-top:1px solid #64eaff3a;border-bottom:1px solid #64eaff24;background:radial-gradient(circle at 50% 50%,#0b52602b 0,transparent 45%),linear-gradient(90deg,transparent,#04121999 18%,#021017d9 50%,#04121999 82%,transparent);box-shadow:inset 0 0 120px #00d9ff0b}
         .jarvis-stage:before,.jarvis-stage:after{content:"";position:absolute;top:9%;bottom:9%;width:1px;background:linear-gradient(transparent,#5aefff88,transparent);box-shadow:0 0 12px #00dcff}.jarvis-stage:before{left:5%}.jarvis-stage:after{right:5%}
         .hud-grid{position:absolute;inset:0;background-image:linear-gradient(#35dff708 1px,transparent 1px),linear-gradient(90deg,#35dff708 1px,transparent 1px);background-size:30px 30px;mask-image:radial-gradient(circle at center,#000 10%,transparent 75%)}
-        .jarvis{width:min(31vw,390px);height:min(31vw,390px);min-width:290px;min-height:290px;position:relative;border-radius:50%;display:grid;place-items:center;margin:auto;filter:drop-shadow(0 0 34px #00d9ff30)}.ring{position:absolute;border:1px solid #48eaff;border-radius:50%;box-shadow:0 0 18px #00d9ff38,inset 0 0 18px #00d9ff20}.r0{inset:0;border-style:dotted;opacity:.42;animation:spin 31s linear reverse infinite}.r1{inset:8%;border-width:2px;border-left-color:transparent;border-bottom-color:#48eaff28;animation:spin 16s linear infinite}.r2{inset:23%;border-style:dashed;animation:spin 10s linear reverse infinite}.r3{inset:37%;border-width:2px;animation:pulseRing 2.4s ease-in-out infinite}.tick-ring{position:absolute;inset:13%;border-radius:50%;background:repeating-conic-gradient(#5cecff 0 1deg,transparent 1deg 6deg);mask:radial-gradient(circle,transparent 0 43%,#000 44% 48%,transparent 49%);opacity:.58;animation:spin 44s linear infinite}.core-letter{width:92px;height:92px;border-radius:50%;display:grid;place-items:center;font:300 46px/1 monospace;color:#efffff;background:radial-gradient(circle,#c9fcff 0 5%,#54eaff 7%,#083f4b 18%,#031018 55%,transparent 70%);border:1px solid #a9fbff;box-shadow:0 0 18px #fff,0 0 52px #00eaff,0 0 120px #00d9ff}.scan-line{position:absolute;width:46%;height:1px;background:linear-gradient(90deg,transparent,#7af5ff,transparent);transform-origin:100% 50%;left:4%;top:50%;animation:spin 4.5s linear infinite}.core-caption{position:absolute;bottom:12%;font:9px monospace;letter-spacing:.26em;color:#58b8c5}
+        .jarvis{width:min(34vw,430px);height:min(34vw,430px);min-width:320px;min-height:320px;position:relative;border-radius:50%;display:grid;place-items:center;margin:auto;filter:drop-shadow(0 0 34px #00d9ff30)}.ring{position:absolute;border:1px solid #48eaff;border-radius:50%;box-shadow:0 0 18px #00d9ff38,inset 0 0 18px #00d9ff20}.r0{inset:0;border-style:dotted;opacity:.42;animation:spin 31s linear reverse infinite}.r1{inset:8%;border-width:2px;border-left-color:transparent;border-bottom-color:#48eaff28;animation:spin 16s linear infinite}.r2{inset:23%;border-style:dashed;animation:spin 10s linear reverse infinite}.r3{inset:37%;border-width:2px;animation:pulseRing 2.4s ease-in-out infinite}.tick-ring{position:absolute;inset:13%;border-radius:50%;background:repeating-conic-gradient(#5cecff 0 1deg,transparent 1deg 6deg);mask:radial-gradient(circle,transparent 0 43%,#000 44% 48%,transparent 49%);opacity:.58;animation:spin 44s linear infinite}.thought-field{position:absolute;inset:27%;border-radius:50%;display:grid;place-items:center;filter:drop-shadow(0 0 25px #00eaff66)}.thought-brain{width:74px;height:74px;border-radius:48% 52% 44% 56%/55% 43% 57% 45%;background:radial-gradient(circle at 38% 35%,#efffff 0 4%,#80f8ff 8%,#0a7487 18%,#05333e 42%,#021014 72%);box-shadow:0 0 18px #fff,0 0 46px #00eaff,0 0 110px #00d9ff;animation:brainPulse 2.2s ease-in-out infinite;z-index:4}.thought-brain:before,.thought-brain:after{content:"";position:absolute;width:38px;height:22px;border:1px solid #a8fbff88;border-radius:50%;filter:blur(.2px)}.thought-brain:before{transform:translate(-22px,-7px) rotate(28deg)}.thought-brain:after{transform:translate(15px,12px) rotate(-24deg)}.thought-wave{position:absolute;border:1px solid #5beeff88;border-radius:50%;animation:thoughtWave 3.2s ease-out infinite}.w1{inset:5%;animation-delay:0s}.w2{inset:-10%;animation-delay:.8s}.w3{inset:-24%;animation-delay:1.6s}.thought-node{position:absolute;width:7px;height:7px;border-radius:50%;background:#b8fdff;box-shadow:0 0 10px #54eaff,0 0 24px #00dfff}.n1{left:8%;top:36%;animation:nodeOrbit 5s linear infinite}.n2{right:3%;top:25%;animation:nodeOrbit 7s linear reverse infinite}.n3{right:12%;bottom:10%;animation:nodeOrbit 6s linear infinite}.n4{left:18%;bottom:2%;animation:nodeOrbit 8s linear reverse infinite}.thought-label{position:absolute;bottom:11%;font:400 11px monospace;letter-spacing:.22em;color:#c9fbff;text-shadow:0 0 12px #00dfff}.thought-detail{position:absolute;top:92%;width:115%;text-align:center;font:9px/1.4 monospace;color:#66aeb9;letter-spacing:.04em}.thought-core.fast .thought-brain{animation-duration:1.15s}.thought-core.fast .ring{animation-duration:5s}.thought-core.alert .thought-brain{animation-duration:.9s;box-shadow:0 0 18px #fff,0 0 50px #8af7ff,0 0 130px #00eaff}.thought-core.alert .thought-wave{animation-duration:1.4s}.thought-core.slow .thought-brain{animation-duration:3.8s}.thought-core.slow .thought-wave{animation-duration:5.2s}
+        @keyframes brainPulse{0%,100%{transform:scale(.92);filter:brightness(.85)}50%{transform:scale(1.08);filter:brightness(1.35)}}@keyframes thoughtWave{0%{transform:scale(.55);opacity:.95}70%{opacity:.25}100%{transform:scale(1.35);opacity:0}}@keyframes nodeOrbit{0%{transform:rotate(0deg) translateX(8px)}50%{transform:rotate(180deg) translateX(-8px)}100%{transform:rotate(360deg) translateX(8px)}}
+        .scan-line{position:absolute;width:46%;height:1px;background:linear-gradient(90deg,transparent,#7af5ff,transparent);transform-origin:100% 50%;left:4%;top:50%;animation:spin 4.5s linear infinite}.core-caption{position:absolute;bottom:12%;font:9px monospace;letter-spacing:.26em;color:#58b8c5}
         .telemetry{position:relative;z-index:2;padding:18px 20px;background:linear-gradient(90deg,#031018b5,transparent 94%);clip-path:polygon(0 0,92% 0,100% 14%,100% 86%,92% 100%,0 100%)}.telemetry.right{background:linear-gradient(270deg,#031018b5,transparent 94%);text-align:right;clip-path:polygon(8% 0,100% 0,100% 100%,8% 100%,0 86%,0 14%)}.hud-label{font:9px monospace;letter-spacing:.26em;color:#3fa8b8}.hud-value{font:300 27px monospace;letter-spacing:.08em;color:#c9fbff;margin:7px 0;text-shadow:0 0 14px #55eaff55}.hud-line{height:1px;background:linear-gradient(90deg,#48eaff,transparent);margin:10px 0 14px}.right .hud-line{background:linear-gradient(270deg,#48eaff,transparent)}.tele-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #37dff216;font:10px monospace;color:#559aa7}.right .tele-row{flex-direction:row-reverse}.tele-row b{font-weight:400;color:#d2fbff}
         .identity-strip{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;padding:14px 4px 20px}.identity-strip span{display:block;font:9px monospace;letter-spacing:.2em;color:#4eb5c4}.identity-strip strong{display:block;font:300 clamp(36px,5vw,70px)/1 monospace;letter-spacing:.18em;color:#eaffff;text-shadow:0 0 18px #4eeaff55}.live-chip{font:10px monospace;color:#6ce6c5}.live-chip i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#62ffd2;box-shadow:0 0 12px #62ffd2;margin-right:7px}
         .command-deck{position:relative;margin:4px 0 24px;padding:14px 18px;border-top:1px solid #3ce8ff3d;border-bottom:1px solid #3ce8ff20;background:linear-gradient(90deg,transparent,#04171ea8 10%,#04171ea8 90%,transparent)}.command-head{display:flex;justify-content:space-between;gap:20px;margin-bottom:9px}.command-head span{font:9px monospace;letter-spacing:.22em;color:#4faebe}.command-head b{font:400 12px monospace;letter-spacing:.17em;color:#8af1ff}.command-input{display:grid;grid-template-columns:1fr auto auto;gap:8px}.command-input textarea{min-height:62px;background:#01090dbb;border:1px solid #2adcf044;color:#e5fdff;padding:12px;resize:vertical}
@@ -801,6 +889,17 @@ class EsterPanel extends HTMLElement {
         h2.section-title{font-size:12px;font-weight:400;letter-spacing:.26em;color:#63eaff;margin:30px 0 12px;text-transform:uppercase}.lead{font-size:18px;color:#8dbbc6}
         .eyebrow{font-size:10px;letter-spacing:.2em;color:#4acde8;text-transform:uppercase}.statusline{font-family:monospace;color:#6ff7d0;margin:6px 0}.pulse{display:inline-block;width:8px;height:8px;background:#60ffd5;border-radius:50%;box-shadow:0 0 12px #60ffd5;margin-right:8px}
         @keyframes spin{to{transform:rotate(360deg)}}@keyframes pulseRing{50%{transform:scale(1.08);opacity:.55}}
+        .plain-explain{margin:12px 0;padding:10px 12px;border-left:2px solid #46e8ff66;background:#03151b99;color:#9bc7cf;line-height:1.45}.decision-section.primary strong{font-size:19px;color:#ecffff}.simple-confidence{text-align:right}.simple-confidence b{display:block;font:400 11px monospace;letter-spacing:.08em;color:#bdfaff}.simple-confidence span{display:block;font:300 28px monospace;color:#61eaff;text-shadow:0 0 12px #00dfff44}.tech-details{margin-top:12px;border-top:1px solid #38dff229;padding-top:10px}.tech-details summary{cursor:pointer;font:9px monospace;letter-spacing:.15em;color:#57b6c5}.simple-status-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0 20px}.simple-status-grid>div{padding:15px 16px;border-top:1px solid #43e8ff42;border-bottom:1px solid #43e8ff1d;background:linear-gradient(90deg,transparent,#04151ca6 10%,#04151ca6 90%,transparent)}.simple-status-grid b{display:block;font:300 25px monospace;color:#d3fdff}.simple-status-grid span{font-size:10px;color:#73aeb8}.mode-toggle{margin-left:auto!important;border-color:#4ceaff77!important}.human-metrics span{line-height:1.25}.forecast-simple h3{font-size:20px;font-weight:400;color:#dffcff}
+        .view-hud-head{position:relative;display:grid;grid-template-columns:110px 1fr minmax(150px,240px);align-items:center;gap:20px;min-height:150px;margin:4px 0 24px;padding:18px 24px;border-top:1px solid #50ecff45;border-bottom:1px solid #50ecff22;background:linear-gradient(90deg,transparent,#041820c4 10%,#041820c4 90%,transparent);overflow:hidden}
+        .view-hud-head:before{content:"";position:absolute;inset:0;background-image:linear-gradient(#35dff708 1px,transparent 1px),linear-gradient(90deg,#35dff708 1px,transparent 1px);background-size:22px 22px;mask-image:linear-gradient(90deg,transparent,#000 15%,#000 85%,transparent)}
+        .mini-reactor{position:relative;width:86px;height:86px;border-radius:50%;display:grid;place-items:center}.mini-ring{position:absolute;border:1px solid #54eaff;border-radius:50%;box-shadow:0 0 12px #00dfff38}.mini-ring.a{inset:0;border-style:dashed;animation:spin 14s linear infinite}.mini-ring.b{inset:17%;animation:spin 7s linear reverse infinite}.mini-ring.c{inset:32%;border-style:dotted}.mini-core{width:22px;height:22px;border-radius:50%;background:#c8fcff;box-shadow:0 0 15px #fff,0 0 38px #00eaff}
+        .view-copy{position:relative;z-index:1}.view-copy p{margin:6px 0;color:#79aeb8}.view-title{margin:3px 0;font:300 clamp(28px,4vw,52px)/1 monospace;letter-spacing:.12em;color:#e8fdff;text-shadow:0 0 16px #49eaff55}.view-metric{position:relative;z-index:1;text-align:right;border-right:1px solid #54eaff55;padding-right:14px}.view-metric span{display:block;font:8px monospace;letter-spacing:.22em;color:#4caaba}.view-metric b{display:block;margin:5px 0;font:300 24px monospace;color:#c9fbff}.view-metric i{display:block;margin-left:auto;width:70%;height:1px;background:linear-gradient(90deg,transparent,#52eaff)}
+        .hud-panel,.control,.health,.decision,.question-panel,.migration,.model,.energy-core{position:relative;border:0!important;border-top:1px solid #4eeaff40!important;border-bottom:1px solid #4eeaff1e!important;background:linear-gradient(90deg,transparent,#04161dc4 7%,#04161dc4 93%,transparent)!important;border-radius:0!important;clip-path:polygon(0 9px,9px 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%);box-shadow:none!important}
+        .hud-panel:before,.control:before,.health:before,.decision:before,.question-panel:before{content:"";position:absolute;left:0;top:22%;bottom:22%;width:2px;background:#51ecff;box-shadow:0 0 10px #00dfff88}
+        .panel-orbit{position:relative;width:112px;height:112px;min-width:112px;border-radius:50%;display:grid;place-items:center;align-content:center}.panel-orbit .panel-ring{position:absolute;inset:5px;border:1px dashed #4ceaff99;border-radius:50%;animation:spin 16s linear infinite;box-shadow:0 0 15px #00dfff25}.panel-orbit:after{content:"";position:absolute;inset:24px;border:1px solid #4ceaff55;border-radius:50%}.panel-orbit b{font:300 24px monospace;color:#d5fdff;z-index:1}.panel-orbit span{font:7px monospace;letter-spacing:.16em;color:#55aeba;z-index:1}.panel-body{flex:1;min-width:0}.model,.migration{display:flex;gap:20px;align-items:center}.model h3,.migration h3{font:400 20px monospace;letter-spacing:.08em}.model details{margin-top:12px;color:#629da8}.model summary{cursor:pointer;font:9px monospace;letter-spacing:.14em;color:#55b8c8}.signal-line{height:2px;background:#0a2b34;margin:14px 0}.signal-line span{display:block;height:100%;background:#54ebff;box-shadow:0 0 10px #54ebff}
+        .tele-list{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.tele-list>div{padding:8px 10px;border-top:1px solid #40eaff2e;background:#03121980}.tele-list span{display:block;font:8px monospace;letter-spacing:.12em;color:#579ba7}.tele-list b{font:300 18px monospace;color:#c7faff}
+        .energy-reactor{position:relative;width:160px;height:160px;min-width:160px;border-radius:50%;display:grid;place-items:center;box-shadow:0 0 35px #00dfff22}.energy-ring{position:absolute;border-radius:50%;border:1px solid #51ecff}.er1{inset:4%;border-style:dashed;animation:spin 13s linear infinite}.er2{inset:22%;border-width:2px;animation:spin 7s linear reverse infinite}.energy-core-dot{width:54px;height:54px;border-radius:50%;background:radial-gradient(circle,#d8ffff 0 8%,#55eaff 10%,#073b46 30%,#021014 65%);box-shadow:0 0 18px #fff,0 0 55px #00eaff}.energy-reactor>span{position:absolute;bottom:14px;font:10px monospace;color:#79eaf8}
+        .hud-gauge{position:relative;width:120px;height:120px;border-radius:50%;background:conic-gradient(#56eaff calc(var(--pct)*1%),#0b2a33 0);padding:3px;box-shadow:0 0 20px #00dfff22}.hud-gauge:after{content:"";position:absolute;inset:7px;border-radius:50%;background:#031016}.gauge-face{position:absolute;inset:0;z-index:2;display:grid;place-items:center;align-content:center}.gauge-face b{font:300 25px monospace;color:#e3feff}.gauge-face span{font:7px monospace;letter-spacing:.15em;color:#5eabb7}.hud-gauge small{position:absolute;top:100%;left:0;right:0;text-align:center;color:#659ba5}
         .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}.stats>div,.metrics>div{padding:18px;border:1px solid #16d8ff35;background:#06151d9e;border-radius:10px}.stats b,.metrics b{display:block;font-size:28px;color:#d9fbff}.stats span,.metrics span{font-size:10px;letter-spacing:.14em;color:#55bdd0}
         .teach,.control,.health{border:1px solid #1eddfc40;background:#041219c8;border-radius:12px;padding:15px}.teach-row,.answer-row,.button-row{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
         textarea,input,select{width:100%;border:1px solid #25dffc44;background:#02090e;color:#dcfbff;border-radius:8px;padding:11px}.teach textarea,.control textarea{min-height:85px;resize:vertical}
@@ -808,11 +907,11 @@ class EsterPanel extends HTMLElement {
         .decision-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.confidence-block{text-align:right;font-family:monospace}.confidence-block span{display:block;font-size:8px;letter-spacing:.18em;color:#4eaabb}.confidence-block b{font-size:28px;font-weight:400;color:#c9fbff;text-shadow:0 0 12px #4eeaff55}.decision-section{margin:14px 0;padding-left:13px;border-left:1px solid #45e9ff55}.decision-section span{display:block;font-size:9px;letter-spacing:.17em;color:#4cb4c4;margin-bottom:5px}.decision-section strong{font-size:17px;font-weight:400;color:#dcfbff}.decision-section p{margin:0;color:#91c0c8;line-height:1.45}.decision-explainer{margin-bottom:14px}.decision h3,.question h3,.migration h3,.model h3{margin:5px 0 10px;color:#e9fdff}.confidence{font-family:monospace;font-size:25px;color:#68efff}.meter{height:3px;background:#0e2a34;margin:8px 0 14px}.meter span{display:block;height:100%;background:#53edff;box-shadow:0 0 10px #2ae8ff}.decision p,.question p,.energy-core p,.control p,.health p{color:#9dc5cf;line-height:1.5}.proposal{padding:10px 12px;background:#06222c;border-left:2px solid #50e9ff;color:#c8f8ff;margin-top:12px}.meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:#4fa3b3;font-family:monospace;font-size:10px;margin-top:13px}
         .answer-row input{flex:1;min-width:180px}.mic-btn{border-radius:999px;border-color:#69f2ff;box-shadow:0 0 14px #00d9ff44;background:radial-gradient(circle,#0b3444,#041018)}.big-mic{min-width:112px}.quick-row{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.quick{padding:7px 10px;font-size:11px}.question-focus{display:grid;grid-template-columns:120px 1fr;gap:18px;align-items:start}.question-radar{position:relative;width:108px;height:108px;border-radius:50%;border:1px solid #69efff99;display:grid;place-items:center;background:radial-gradient(circle,#0bdcff24 0,#031018 58%,transparent 59%);box-shadow:0 0 25px #00dcff22,inset 0 0 25px #00dcff18}.radar-ring{position:absolute;border:1px solid #43e8ff66;border-radius:50%}.rr1{inset:12%;border-style:dashed;animation:spin 9s linear infinite}.rr2{inset:28%;animation:spin 5s linear reverse infinite}.radar-value{font:700 20px monospace;color:#c9fbff;text-shadow:0 0 12px #56eaff}.question-block{margin:10px 0;padding:9px 12px;border-left:2px solid #28dff2;background:linear-gradient(90deg,#09202a88,transparent)}.question-block span{display:block;font-size:9px;letter-spacing:.18em;color:#49c6dc}.question-block p{margin:5px 0}.question-block.ask{border-left-color:#fff}.question-block.why{border-left-color:#6ff7d0}.hint{font-size:12px;color:#7db5c0;font-style:italic;margin:8px 0}.energy-core{display:flex;align-items:center;gap:35px}.orb{width:150px;height:150px;border-radius:50%;border:1px solid #4dedff;display:grid;place-items:center;box-shadow:0 0 30px #00d9ff45,inset 0 0 35px #00d9ff25;flex:0 0 auto}.orb-core{width:48px;height:48px;border-radius:50%;background:#c9fbff;box-shadow:0 0 50px #16e5ff}.energy-data{flex:1}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metrics.compact b{font-size:19px}.status{font-family:monospace;color:#6ff6cb}.model pre{white-space:pre-wrap;max-height:310px;overflow:auto;color:#7eb9c5;font-size:11px}.empty{padding:30px;color:#6c9da8;border:1px dashed #1bd5ef35;border-radius:10px}
         .health.ok{border-color:#5dffc16b}.health.warn{border-color:#ffc95d59}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:10px 0}.form-grid.one{grid-template-columns:1fr auto}.form-grid label{font-size:11px;color:#68c9da;letter-spacing:.08em}.form-grid label input,.form-grid label select{margin-top:5px}.timeline{display:grid;gap:7px;margin-top:12px}.timeline div{display:flex;justify-content:space-between;gap:15px;padding:9px;border-bottom:1px solid #1cdff322}.timeline span{color:#7bbcca;font-size:12px}
-        @media(max-width:800px){.jarvis-stage{grid-template-columns:1fr;min-height:600px}.telemetry{position:absolute;width:47%;bottom:6px;padding:12px}.telemetry.left{left:0}.telemetry.right{right:0}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}.identity-strip{align-items:flex-start;flex-direction:column}.command-input{grid-template-columns:1fr}.question-panel{grid-template-columns:1fr;padding:20px}.question-index{display:none}.question-context{grid-template-columns:1fr}.answer-console{grid-template-columns:1fr}.question-main h2{font-size:22px}.question-prompt{font-size:18px}.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:310px;gap:18px;padding:18px;flex-direction:column}.jarvis{width:175px;height:175px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
+        @media(max-width:800px){.simple-status-grid{grid-template-columns:repeat(2,1fr)}.mode-toggle{margin-left:0!important}.view-hud-head{grid-template-columns:72px 1fr;min-height:120px;padding:12px}.view-metric{grid-column:1/-1;text-align:left;border-right:0;border-left:1px solid #54eaff55;padding:8px 0 8px 10px}.mini-reactor{width:64px;height:64px}.model,.migration{align-items:flex-start}.panel-orbit{width:80px;height:80px;min-width:80px}.tele-list{grid-template-columns:1fr}.energy-reactor{width:130px;height:130px;min-width:130px;margin:auto}.jarvis-stage{grid-template-columns:1fr;min-height:600px}.telemetry{position:absolute;width:47%;bottom:6px;padding:12px}.telemetry.left{left:0}.telemetry.right{right:0}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}.identity-strip{align-items:flex-start;flex-direction:column}.command-input{grid-template-columns:1fr}.question-panel{grid-template-columns:1fr;padding:20px}.question-index{display:none}.question-context{grid-template-columns:1fr}.answer-console{grid-template-columns:1fr}.question-main h2{font-size:22px}.question-prompt{font-size:18px}.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:310px;gap:18px;padding:18px;flex-direction:column}.jarvis{width:175px;height:175px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
       </style>
       <div class="shell">
         ${this._notice ? '<div class="notice">'+this.esc(this._notice)+'</div>' : ''}
-        <nav>${tabs.map(([id,label])=>`<button data-tab="${id}" class="${this._tab===id?"active":""}">${label}</button>`).join("")}</nav>
+        <nav>${tabs.map(([id,label])=>`<button data-tab="${id}" class="${this._tab===id?"active":""}">${label}</button>`).join("")}<button id="mode-toggle" class="mode-toggle">${this._advanced?"MODALITÀ SEMPLICE":"DETTAGLI TECNICI"}</button></nav>
         ${body}
       </div>
     `;

@@ -479,7 +479,7 @@ def register_services(hass):
         }),
         "remove_flexible_load": (remove_flexible_load, {vol.Required("load_id"): SHORT}),
         "run_replay": (run_replay, {
-            vol.Optional("days", default=7): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+            vol.Optional("days", default=7): vol.All(vol.Coerce(int), vol.Range(min=1, max=56)),
             vol.Optional("step_minutes", default=30): vol.All(vol.Coerce(int), vol.Range(min=30, max=240)),
         }),
         "simulate_scenario": (simulate, {
