@@ -8,11 +8,18 @@ class EsterPanel extends HTMLElement {
     this._decisionCategory = "all";
     this._advanced = false;
     this._notice = "";
+    this._neuralFrame = 0;
+    this._neuralResize = null;
+    this._neuralStartedAt = 0;
+    this._neuralNodes = [];
+    this._neuralEdges = [];
+    this._neuralImpulses = [];
   }
 
   set hass(value) { this._hass = value; this.render(); }
   set panel(value) { this._panel = value; }
   connectedCallback() { this.render(); }
+  disconnectedCallback() { this.stopNeuralCore(); }
 
   state(id) { return this._hass?.states?.[id]; }
   summary() { return this.state("sensor.e_s_t_e_r_summary")?.attributes || {}; }
@@ -754,6 +761,200 @@ class EsterPanel extends HTMLElement {
     if (filter) filter.onchange=()=>{this._decisionCategory=filter.value;this.render();};
   }
 
+  stopNeuralCore() {
+    if (this._neuralFrame) cancelAnimationFrame(this._neuralFrame);
+    this._neuralFrame = 0;
+    if (this._neuralResize) {
+      window.removeEventListener("resize", this._neuralResize);
+      this._neuralResize = null;
+    }
+  }
+
+  neuralProfile(mode) {
+    const profiles = {
+      observing:{speed:.35, energy:.34, impulses:3, jitter:.7, glow:.65},
+      waiting:{speed:.18, energy:.22, impulses:1, jitter:.35, glow:.48},
+      thinking:{speed:.78, energy:.72, impulses:8, jitter:1.6, glow:1},
+      replay:{speed:1.3, energy:1, impulses:14, jitter:2.2, glow:1.25},
+      alert:{speed:1.05, energy:.95, impulses:11, jitter:2.8, glow:1.35},
+    };
+    return profiles[mode] || profiles.observing;
+  }
+
+  buildNeuralNetwork() {
+    const nodes = [];
+    const rings = 7;
+    const perRing = [14,20,26,32,34,28,20];
+    for (let r=0; r<rings; r++) {
+      const radius = .12 + r * .055;
+      const count = perRing[r];
+      for (let i=0; i<count; i++) {
+        const a = (i / count) * Math.PI * 2 + (r%2 ? .11 : 0);
+        const warp = 1 + Math.sin(a*3 + r*.7)*.09 + Math.cos(a*5-r)*.04;
+        nodes.push({
+          a,
+          r:radius*warp,
+          phase:Math.random()*Math.PI*2,
+          size:.55+Math.random()*1.6,
+          drift:(Math.random()-.5)*.004,
+          ring:r,
+        });
+      }
+    }
+    for (let i=0;i<34;i++) {
+      nodes.push({
+        a:Math.random()*Math.PI*2,
+        r:.05+Math.random()*.16,
+        phase:Math.random()*Math.PI*2,
+        size:.8+Math.random()*2,
+        drift:(Math.random()-.5)*.006,
+        ring:-1,
+      });
+    }
+
+    const edges=[];
+    for (let i=0;i<nodes.length;i++) {
+      const a=nodes[i];
+      const candidates=[];
+      for (let j=0;j<nodes.length;j++) {
+        if(i===j) continue;
+        const b=nodes[j];
+        let da=Math.abs(a.a-b.a); da=Math.min(da,Math.PI*2-da);
+        const dr=Math.abs(a.r-b.r);
+        const score=da*1.8+dr*9;
+        if(score<.72) candidates.push([score,j]);
+      }
+      candidates.sort((x,y)=>x[0]-y[0]);
+      const n=2+(i%3===0?1:0);
+      for(const [,j] of candidates.slice(0,n)) {
+        const x=Math.min(i,j), y=Math.max(i,j);
+        if(!edges.some(e=>e[0]===x&&e[1]===y)) edges.push([x,y,Math.random()*Math.PI*2]);
+      }
+    }
+    this._neuralNodes=nodes;
+    this._neuralEdges=edges;
+    this._neuralImpulses=[];
+  }
+
+  startNeuralCore() {
+    this.stopNeuralCore();
+    const canvas=this.shadowRoot?.querySelector("#neural-core");
+    if(!canvas || this._tab!=="overview") return;
+    if(!this._neuralNodes.length) this.buildNeuralNetwork();
+
+    const resize=()=>{
+      const rect=canvas.getBoundingClientRect();
+      const dpr=Math.min(2,window.devicePixelRatio||1);
+      const w=Math.max(1,Math.round(rect.width*dpr));
+      const h=Math.max(1,Math.round(rect.height*dpr));
+      if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
+    };
+    this._neuralResize=resize;
+    window.addEventListener("resize",resize,{passive:true});
+    resize();
+    this._neuralStartedAt=performance.now();
+
+    const draw=(now)=>{
+      if(!canvas.isConnected || this._tab!=="overview"){this.stopNeuralCore();return;}
+      resize();
+      const ctx=canvas.getContext("2d");
+      if(!ctx){this.stopNeuralCore();return;}
+      const dpr=Math.min(2,window.devicePixelRatio||1);
+      const w=canvas.width/dpr,h=canvas.height/dpr;
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      ctx.clearRect(0,0,w,h);
+
+      const thought=this.thoughtState();
+      const p=this.neuralProfile(thought.mode);
+      const t=(now-this._neuralStartedAt)/1000;
+      const cx=w/2, cy=h/2;
+      const base=Math.min(w,h)*.9;
+      const breathing=1+Math.sin(t*(.8+p.speed))*.018*p.energy;
+
+      ctx.save();
+      ctx.globalCompositeOperation="lighter";
+
+      const halo=ctx.createRadialGradient(cx,cy,0,cx,cy,base*.48);
+      halo.addColorStop(0,"rgba(185,253,255,.16)");
+      halo.addColorStop(.18,`rgba(67,233,255,${.10*p.glow})`);
+      halo.addColorStop(.55,`rgba(0,215,255,${.045*p.glow})`);
+      halo.addColorStop(1,"rgba(0,120,160,0)");
+      ctx.fillStyle=halo;ctx.beginPath();ctx.arc(cx,cy,base*.49,0,Math.PI*2);ctx.fill();
+
+      const pts=this._neuralNodes.map((n,idx)=>{
+        const spin=t*(.035+p.speed*.025)*(n.r>.28?1:-.65);
+        const pulse=Math.sin(t*(1.1+p.speed)+n.phase)*(.006+.008*p.energy);
+        const noise=Math.sin(t*(1.7+p.speed)+idx*.73+n.phase)*n.drift*p.jitter;
+        const rr=(n.r+pulse+noise)*base*breathing;
+        const aa=n.a+spin+Math.sin(t*.7+n.phase)*.006*p.jitter;
+        const squash=.79 + .05*Math.sin(t*.42);
+        return {x:cx+Math.cos(aa)*rr,y:cy+Math.sin(aa)*rr*squash,n};
+      });
+
+      for(const [ia,ib,phase] of this._neuralEdges){
+        const a=pts[ia], b=pts[ib];
+        const flicker=.12+.28*(.5+.5*Math.sin(t*(1.8+p.speed*2)+phase));
+        ctx.strokeStyle=`rgba(64,235,255,${flicker*p.glow})`;
+        ctx.lineWidth=.45+.65*p.energy;
+        ctx.beginPath();
+        const mx=(a.x+b.x)/2 + Math.sin(t*.8+phase)*5*p.energy;
+        const my=(a.y+b.y)/2 + Math.cos(t*.7+phase)*5*p.energy;
+        ctx.moveTo(a.x,a.y);ctx.quadraticCurveTo(mx,my,b.x,b.y);ctx.stroke();
+      }
+
+      for(let i=0;i<pts.length;i++){
+        const q=pts[i];
+        const flick=.45+.55*(.5+.5*Math.sin(t*(1.3+p.speed)+q.n.phase));
+        const r=q.n.size*(.65+p.energy*.5);
+        ctx.shadowBlur=5+7*p.glow;ctx.shadowColor="rgba(67,238,255,.9)";
+        ctx.fillStyle=`rgba(178,251,255,${.32+.55*flick})`;
+        ctx.beginPath();ctx.arc(q.x,q.y,r,0,Math.PI*2);ctx.fill();
+      }
+      ctx.shadowBlur=0;
+
+      const desired=p.impulses;
+      while(this._neuralImpulses.length<desired){
+        const edgeIndex=Math.floor(Math.random()*this._neuralEdges.length);
+        this._neuralImpulses.push({edgeIndex,u:Math.random(),speed:.12+Math.random()*.22,life:.7+Math.random()*.7});
+      }
+      while(this._neuralImpulses.length>desired) this._neuralImpulses.pop();
+      for(const imp of this._neuralImpulses){
+        imp.u=(imp.u+imp.speed*(.35+p.speed)*.016)%1;
+        const [ia,ib]=this._neuralEdges[imp.edgeIndex%this._neuralEdges.length];
+        const a=pts[ia],b=pts[ib],u=imp.u;
+        const x=a.x+(b.x-a.x)*u, y=a.y+(b.y-a.y)*u;
+        const rg=ctx.createRadialGradient(x,y,0,x,y,9+8*p.energy);
+        rg.addColorStop(0,"rgba(255,255,255,1)");
+        rg.addColorStop(.18,"rgba(146,250,255,.95)");
+        rg.addColorStop(1,"rgba(0,220,255,0)");
+        ctx.fillStyle=rg;ctx.beginPath();ctx.arc(x,y,10+8*p.energy,0,Math.PI*2);ctx.fill();
+      }
+
+      const corePulse=.88+.12*Math.sin(t*(1.7+p.speed*1.8));
+      const coreR=base*(.055+.018*p.energy)*corePulse;
+      const core=ctx.createRadialGradient(cx,cy,0,cx,cy,coreR*3.4);
+      core.addColorStop(0,"rgba(255,255,255,.98)");
+      core.addColorStop(.13,"rgba(158,252,255,.95)");
+      core.addColorStop(.4,`rgba(32,225,255,${.7*p.glow})`);
+      core.addColorStop(1,"rgba(0,130,175,0)");
+      ctx.fillStyle=core;ctx.beginPath();ctx.arc(cx,cy,coreR*3.4,0,Math.PI*2);ctx.fill();
+
+      for(let k=0;k<3;k++){
+        const rr=base*(.37+k*.045 + Math.sin(t*(.55+k*.12))* .006);
+        ctx.strokeStyle=`rgba(78,235,255,${(.11-k*.02)*p.glow})`;
+        ctx.lineWidth=.6;
+        ctx.setLineDash([2+k,8+k*3]);
+        ctx.lineDashOffset=-t*(7+k*4)*p.speed;
+        ctx.beginPath();ctx.ellipse(cx,cy,rr,rr*.79,0,0,Math.PI*2);ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      this._neuralFrame=requestAnimationFrame(draw);
+    };
+    this._neuralFrame=requestAnimationFrame(draw);
+  }
+
   thoughtState() {
     const s = this.summary();
     const q = Number(this.state("sensor.e_s_t_e_r_questions")?.state || 0);
@@ -771,6 +972,7 @@ class EsterPanel extends HTMLElement {
 
   render() {
     if (!this.shadowRoot) return;
+    this.stopNeuralCore();
     const s = this.summary();
     const status = this.state("sensor.e_s_t_e_r_status")?.state || "loading";
     const decisionCount = this.state("sensor.e_s_t_e_r_shadow_decisions")?.state || "0";
@@ -800,22 +1002,14 @@ class EsterPanel extends HTMLElement {
             <div class="tele-row"><span>ATTUAZIONI</span><b>0</b></div>
           </div>
 
-          <div class="jarvis thought-core ${this.esc(thought.pulse)}" data-mode="${this.esc(thought.mode)}">
-            <div class="ring r0"></div><div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
-            <div class="tick-ring"></div>
-            <div class="thought-field">
-              <div class="thought-wave w1"></div>
-              <div class="thought-wave w2"></div>
-              <div class="thought-wave w3"></div>
-              <div class="thought-node n1"></div>
-              <div class="thought-node n2"></div>
-              <div class="thought-node n3"></div>
-              <div class="thought-node n4"></div>
-              <div class="thought-brain"></div>
+          <div class="jarvis neural-canvas-core" data-mode="${this.esc(thought.mode)}">
+            <canvas id="neural-core" aria-label="${this.esc(thought.label)}"></canvas>
+            <div class="neural-reticle nr1"></div>
+            <div class="neural-reticle nr2"></div>
+            <div class="neural-caption">
+              <strong>${this.esc(thought.label)}</strong>
+              <span>${this.esc(thought.detail)}</span>
             </div>
-            <div class="scan-line"></div>
-            <div class="thought-label">${this.esc(thought.label)}</div>
-            <div class="thought-detail">${this.esc(thought.detail)}</div>
           </div>
 
           <div class="telemetry right">
@@ -879,7 +1073,7 @@ class EsterPanel extends HTMLElement {
 .jarvis-stage{min-height:430px;position:relative;display:grid;grid-template-columns:minmax(210px,1fr) minmax(300px,460px) minmax(210px,1fr);align-items:center;gap:26px;overflow:hidden;border-top:1px solid #64eaff3a;border-bottom:1px solid #64eaff24;background:radial-gradient(circle at 50% 50%,#0b52602b 0,transparent 45%),linear-gradient(90deg,transparent,#04121999 18%,#021017d9 50%,#04121999 82%,transparent);box-shadow:inset 0 0 120px #00d9ff0b}
         .jarvis-stage:before,.jarvis-stage:after{content:"";position:absolute;top:9%;bottom:9%;width:1px;background:linear-gradient(transparent,#5aefff88,transparent);box-shadow:0 0 12px #00dcff}.jarvis-stage:before{left:5%}.jarvis-stage:after{right:5%}
         .hud-grid{position:absolute;inset:0;background-image:linear-gradient(#35dff708 1px,transparent 1px),linear-gradient(90deg,#35dff708 1px,transparent 1px);background-size:30px 30px;mask-image:radial-gradient(circle at center,#000 10%,transparent 75%)}
-        .jarvis{width:min(34vw,430px);height:min(34vw,430px);min-width:320px;min-height:320px;position:relative;border-radius:50%;display:grid;place-items:center;margin:auto;filter:drop-shadow(0 0 34px #00d9ff30)}.ring{position:absolute;border:1px solid #48eaff;border-radius:50%;box-shadow:0 0 18px #00d9ff38,inset 0 0 18px #00d9ff20}.r0{inset:0;border-style:dotted;opacity:.42;animation:spin 31s linear reverse infinite}.r1{inset:8%;border-width:2px;border-left-color:transparent;border-bottom-color:#48eaff28;animation:spin 16s linear infinite}.r2{inset:23%;border-style:dashed;animation:spin 10s linear reverse infinite}.r3{inset:37%;border-width:2px;animation:pulseRing 2.4s ease-in-out infinite}.tick-ring{position:absolute;inset:13%;border-radius:50%;background:repeating-conic-gradient(#5cecff 0 1deg,transparent 1deg 6deg);mask:radial-gradient(circle,transparent 0 43%,#000 44% 48%,transparent 49%);opacity:.58;animation:spin 44s linear infinite}.thought-field{position:absolute;inset:27%;border-radius:50%;display:grid;place-items:center;filter:drop-shadow(0 0 25px #00eaff66)}.thought-brain{width:74px;height:74px;border-radius:48% 52% 44% 56%/55% 43% 57% 45%;background:radial-gradient(circle at 38% 35%,#efffff 0 4%,#80f8ff 8%,#0a7487 18%,#05333e 42%,#021014 72%);box-shadow:0 0 18px #fff,0 0 46px #00eaff,0 0 110px #00d9ff;animation:brainPulse 2.2s ease-in-out infinite;z-index:4}.thought-brain:before,.thought-brain:after{content:"";position:absolute;width:38px;height:22px;border:1px solid #a8fbff88;border-radius:50%;filter:blur(.2px)}.thought-brain:before{transform:translate(-22px,-7px) rotate(28deg)}.thought-brain:after{transform:translate(15px,12px) rotate(-24deg)}.thought-wave{position:absolute;border:1px solid #5beeff88;border-radius:50%;animation:thoughtWave 3.2s ease-out infinite}.w1{inset:5%;animation-delay:0s}.w2{inset:-10%;animation-delay:.8s}.w3{inset:-24%;animation-delay:1.6s}.thought-node{position:absolute;width:7px;height:7px;border-radius:50%;background:#b8fdff;box-shadow:0 0 10px #54eaff,0 0 24px #00dfff}.n1{left:8%;top:36%;animation:nodeOrbit 5s linear infinite}.n2{right:3%;top:25%;animation:nodeOrbit 7s linear reverse infinite}.n3{right:12%;bottom:10%;animation:nodeOrbit 6s linear infinite}.n4{left:18%;bottom:2%;animation:nodeOrbit 8s linear reverse infinite}.thought-label{position:absolute;bottom:11%;font:400 11px monospace;letter-spacing:.22em;color:#c9fbff;text-shadow:0 0 12px #00dfff}.thought-detail{position:absolute;top:92%;width:115%;text-align:center;font:9px/1.4 monospace;color:#66aeb9;letter-spacing:.04em}.thought-core.fast .thought-brain{animation-duration:1.15s}.thought-core.fast .ring{animation-duration:5s}.thought-core.alert .thought-brain{animation-duration:.9s;box-shadow:0 0 18px #fff,0 0 50px #8af7ff,0 0 130px #00eaff}.thought-core.alert .thought-wave{animation-duration:1.4s}.thought-core.slow .thought-brain{animation-duration:3.8s}.thought-core.slow .thought-wave{animation-duration:5.2s}
+        .jarvis{width:min(34vw,430px);height:min(34vw,430px);min-width:320px;min-height:320px;position:relative;border-radius:50%;display:grid;place-items:center;margin:auto;filter:drop-shadow(0 0 34px #00d9ff30)}.ring{position:absolute;border:1px solid #48eaff;border-radius:50%;box-shadow:0 0 18px #00d9ff38,inset 0 0 18px #00d9ff20}.r0{inset:0;border-style:dotted;opacity:.42;animation:spin 31s linear reverse infinite}.r1{inset:8%;border-width:2px;border-left-color:transparent;border-bottom-color:#48eaff28;animation:spin 16s linear infinite}.r2{inset:23%;border-style:dashed;animation:spin 10s linear reverse infinite}.r3{inset:37%;border-width:2px;animation:pulseRing 2.4s ease-in-out infinite}.tick-ring{position:absolute;inset:13%;border-radius:50%;background:repeating-conic-gradient(#5cecff 0 1deg,transparent 1deg 6deg);mask:radial-gradient(circle,transparent 0 43%,#000 44% 48%,transparent 49%);opacity:.58;animation:spin 44s linear infinite}.neural-canvas-core{position:relative;isolation:isolate}.neural-canvas-core canvas{position:absolute;inset:1%;width:98%;height:98%;display:block;filter:drop-shadow(0 0 14px #00dfff55)}.neural-canvas-core:before{content:"";position:absolute;inset:7%;border-radius:50%;background:radial-gradient(circle,transparent 0 45%,#00eaff08 58%,transparent 72%);box-shadow:inset 0 0 70px #00eaff10;pointer-events:none}.neural-reticle{position:absolute;border-radius:50%;pointer-events:none}.nr1{inset:4%;border:1px solid #4ceaff4f;border-left-color:transparent;border-right-color:transparent;animation:spin 26s linear infinite}.nr2{inset:15%;border:1px dashed #4ceaff32;animation:spin 17s linear reverse infinite}.neural-caption{position:absolute;left:-5%;right:-5%;bottom:4%;text-align:center;display:grid;gap:5px;pointer-events:none}.neural-caption strong{font:400 12px monospace;letter-spacing:.22em;color:#d8fdff;text-shadow:0 0 14px #00dfff}.neural-caption span{font:9px/1.4 monospace;color:#67acb8;letter-spacing:.025em}.thought-field{display:none!important}position:absolute;inset:27%;border-radius:50%;display:grid;place-items:center;filter:drop-shadow(0 0 25px #00eaff66)}.thought-brain{width:74px;height:74px;border-radius:48% 52% 44% 56%/55% 43% 57% 45%;background:radial-gradient(circle at 38% 35%,#efffff 0 4%,#80f8ff 8%,#0a7487 18%,#05333e 42%,#021014 72%);box-shadow:0 0 18px #fff,0 0 46px #00eaff,0 0 110px #00d9ff;animation:brainPulse 2.2s ease-in-out infinite;z-index:4}.thought-brain:before,.thought-brain:after{content:"";position:absolute;width:38px;height:22px;border:1px solid #a8fbff88;border-radius:50%;filter:blur(.2px)}.thought-brain:before{transform:translate(-22px,-7px) rotate(28deg)}.thought-brain:after{transform:translate(15px,12px) rotate(-24deg)}.thought-wave{position:absolute;border:1px solid #5beeff88;border-radius:50%;animation:thoughtWave 3.2s ease-out infinite}.w1{inset:5%;animation-delay:0s}.w2{inset:-10%;animation-delay:.8s}.w3{inset:-24%;animation-delay:1.6s}.thought-node{position:absolute;width:7px;height:7px;border-radius:50%;background:#b8fdff;box-shadow:0 0 10px #54eaff,0 0 24px #00dfff}.n1{left:8%;top:36%;animation:nodeOrbit 5s linear infinite}.n2{right:3%;top:25%;animation:nodeOrbit 7s linear reverse infinite}.n3{right:12%;bottom:10%;animation:nodeOrbit 6s linear infinite}.n4{left:18%;bottom:2%;animation:nodeOrbit 8s linear reverse infinite}.thought-label{position:absolute;bottom:11%;font:400 11px monospace;letter-spacing:.22em;color:#c9fbff;text-shadow:0 0 12px #00dfff}.thought-detail{position:absolute;top:92%;width:115%;text-align:center;font:9px/1.4 monospace;color:#66aeb9;letter-spacing:.04em}.thought-core.fast .thought-brain{animation-duration:1.15s}.thought-core.fast .ring{animation-duration:5s}.thought-core.alert .thought-brain{animation-duration:.9s;box-shadow:0 0 18px #fff,0 0 50px #8af7ff,0 0 130px #00eaff}.thought-core.alert .thought-wave{animation-duration:1.4s}.thought-core.slow .thought-brain{animation-duration:3.8s}.thought-core.slow .thought-wave{animation-duration:5.2s}
         @keyframes brainPulse{0%,100%{transform:scale(.92);filter:brightness(.85)}50%{transform:scale(1.08);filter:brightness(1.35)}}@keyframes thoughtWave{0%{transform:scale(.55);opacity:.95}70%{opacity:.25}100%{transform:scale(1.35);opacity:0}}@keyframes nodeOrbit{0%{transform:rotate(0deg) translateX(8px)}50%{transform:rotate(180deg) translateX(-8px)}100%{transform:rotate(360deg) translateX(8px)}}
         .scan-line{position:absolute;width:46%;height:1px;background:linear-gradient(90deg,transparent,#7af5ff,transparent);transform-origin:100% 50%;left:4%;top:50%;animation:spin 4.5s linear infinite}.core-caption{position:absolute;bottom:12%;font:9px monospace;letter-spacing:.26em;color:#58b8c5}
         .telemetry{position:relative;z-index:2;padding:18px 20px;background:linear-gradient(90deg,#031018b5,transparent 94%);clip-path:polygon(0 0,92% 0,100% 14%,100% 86%,92% 100%,0 100%)}.telemetry.right{background:linear-gradient(270deg,#031018b5,transparent 94%);text-align:right;clip-path:polygon(8% 0,100% 0,100% 100%,8% 100%,0 86%,0 14%)}.hud-label{font:9px monospace;letter-spacing:.26em;color:#3fa8b8}.hud-value{font:300 27px monospace;letter-spacing:.08em;color:#c9fbff;margin:7px 0;text-shadow:0 0 14px #55eaff55}.hud-line{height:1px;background:linear-gradient(90deg,#48eaff,transparent);margin:10px 0 14px}.right .hud-line{background:linear-gradient(270deg,#48eaff,transparent)}.tele-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #37dff216;font:10px monospace;color:#559aa7}.right .tele-row{flex-direction:row-reverse}.tele-row b{font-weight:400;color:#d2fbff}
@@ -907,7 +1101,7 @@ class EsterPanel extends HTMLElement {
         .decision-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.confidence-block{text-align:right;font-family:monospace}.confidence-block span{display:block;font-size:8px;letter-spacing:.18em;color:#4eaabb}.confidence-block b{font-size:28px;font-weight:400;color:#c9fbff;text-shadow:0 0 12px #4eeaff55}.decision-section{margin:14px 0;padding-left:13px;border-left:1px solid #45e9ff55}.decision-section span{display:block;font-size:9px;letter-spacing:.17em;color:#4cb4c4;margin-bottom:5px}.decision-section strong{font-size:17px;font-weight:400;color:#dcfbff}.decision-section p{margin:0;color:#91c0c8;line-height:1.45}.decision-explainer{margin-bottom:14px}.decision h3,.question h3,.migration h3,.model h3{margin:5px 0 10px;color:#e9fdff}.confidence{font-family:monospace;font-size:25px;color:#68efff}.meter{height:3px;background:#0e2a34;margin:8px 0 14px}.meter span{display:block;height:100%;background:#53edff;box-shadow:0 0 10px #2ae8ff}.decision p,.question p,.energy-core p,.control p,.health p{color:#9dc5cf;line-height:1.5}.proposal{padding:10px 12px;background:#06222c;border-left:2px solid #50e9ff;color:#c8f8ff;margin-top:12px}.meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:#4fa3b3;font-family:monospace;font-size:10px;margin-top:13px}
         .answer-row input{flex:1;min-width:180px}.mic-btn{border-radius:999px;border-color:#69f2ff;box-shadow:0 0 14px #00d9ff44;background:radial-gradient(circle,#0b3444,#041018)}.big-mic{min-width:112px}.quick-row{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.quick{padding:7px 10px;font-size:11px}.question-focus{display:grid;grid-template-columns:120px 1fr;gap:18px;align-items:start}.question-radar{position:relative;width:108px;height:108px;border-radius:50%;border:1px solid #69efff99;display:grid;place-items:center;background:radial-gradient(circle,#0bdcff24 0,#031018 58%,transparent 59%);box-shadow:0 0 25px #00dcff22,inset 0 0 25px #00dcff18}.radar-ring{position:absolute;border:1px solid #43e8ff66;border-radius:50%}.rr1{inset:12%;border-style:dashed;animation:spin 9s linear infinite}.rr2{inset:28%;animation:spin 5s linear reverse infinite}.radar-value{font:700 20px monospace;color:#c9fbff;text-shadow:0 0 12px #56eaff}.question-block{margin:10px 0;padding:9px 12px;border-left:2px solid #28dff2;background:linear-gradient(90deg,#09202a88,transparent)}.question-block span{display:block;font-size:9px;letter-spacing:.18em;color:#49c6dc}.question-block p{margin:5px 0}.question-block.ask{border-left-color:#fff}.question-block.why{border-left-color:#6ff7d0}.hint{font-size:12px;color:#7db5c0;font-style:italic;margin:8px 0}.energy-core{display:flex;align-items:center;gap:35px}.orb{width:150px;height:150px;border-radius:50%;border:1px solid #4dedff;display:grid;place-items:center;box-shadow:0 0 30px #00d9ff45,inset 0 0 35px #00d9ff25;flex:0 0 auto}.orb-core{width:48px;height:48px;border-radius:50%;background:#c9fbff;box-shadow:0 0 50px #16e5ff}.energy-data{flex:1}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metrics.compact b{font-size:19px}.status{font-family:monospace;color:#6ff6cb}.model pre{white-space:pre-wrap;max-height:310px;overflow:auto;color:#7eb9c5;font-size:11px}.empty{padding:30px;color:#6c9da8;border:1px dashed #1bd5ef35;border-radius:10px}
         .health.ok{border-color:#5dffc16b}.health.warn{border-color:#ffc95d59}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:10px 0}.form-grid.one{grid-template-columns:1fr auto}.form-grid label{font-size:11px;color:#68c9da;letter-spacing:.08em}.form-grid label input,.form-grid label select{margin-top:5px}.timeline{display:grid;gap:7px;margin-top:12px}.timeline div{display:flex;justify-content:space-between;gap:15px;padding:9px;border-bottom:1px solid #1cdff322}.timeline span{color:#7bbcca;font-size:12px}
-        @media(max-width:800px){.simple-status-grid{grid-template-columns:repeat(2,1fr)}.mode-toggle{margin-left:0!important}.view-hud-head{grid-template-columns:72px 1fr;min-height:120px;padding:12px}.view-metric{grid-column:1/-1;text-align:left;border-right:0;border-left:1px solid #54eaff55;padding:8px 0 8px 10px}.mini-reactor{width:64px;height:64px}.model,.migration{align-items:flex-start}.panel-orbit{width:80px;height:80px;min-width:80px}.tele-list{grid-template-columns:1fr}.energy-reactor{width:130px;height:130px;min-width:130px;margin:auto}.jarvis-stage{grid-template-columns:1fr;min-height:600px}.telemetry{position:absolute;width:47%;bottom:6px;padding:12px}.telemetry.left{left:0}.telemetry.right{right:0}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}.identity-strip{align-items:flex-start;flex-direction:column}.command-input{grid-template-columns:1fr}.question-panel{grid-template-columns:1fr;padding:20px}.question-index{display:none}.question-context{grid-template-columns:1fr}.answer-console{grid-template-columns:1fr}.question-main h2{font-size:22px}.question-prompt{font-size:18px}.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:310px;gap:18px;padding:18px;flex-direction:column}.jarvis{width:175px;height:175px}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
+        @media(max-width:800px){.simple-status-grid{grid-template-columns:repeat(2,1fr)}.mode-toggle{margin-left:0!important}.view-hud-head{grid-template-columns:72px 1fr;min-height:120px;padding:12px}.view-metric{grid-column:1/-1;text-align:left;border-right:0;border-left:1px solid #54eaff55;padding:8px 0 8px 10px}.mini-reactor{width:64px;height:64px}.model,.migration{align-items:flex-start}.panel-orbit{width:80px;height:80px;min-width:80px}.tele-list{grid-template-columns:1fr}.energy-reactor{width:130px;height:130px;min-width:130px;margin:auto}.jarvis-stage{grid-template-columns:1fr;min-height:600px}.telemetry{position:absolute;width:47%;bottom:6px;padding:12px}.telemetry.left{left:0}.telemetry.right{right:0}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}.identity-strip{align-items:flex-start;flex-direction:column}.command-input{grid-template-columns:1fr}.question-panel{grid-template-columns:1fr;padding:20px}.question-index{display:none}.question-context{grid-template-columns:1fr}.answer-console{grid-template-columns:1fr}.question-main h2{font-size:22px}.question-prompt{font-size:18px}.shell{padding:10px}.question-focus{grid-template-columns:1fr}.question-radar{width:82px;height:82px}.hero{min-height:310px;gap:18px;padding:18px;flex-direction:column}.jarvis{width:min(82vw,360px);height:min(82vw,360px)}h1{font-size:42px}.stats{grid-template-columns:repeat(2,1fr)}.energy-core{display:block}.orb{margin:0 auto 20px}.metrics{grid-template-columns:repeat(2,1fr)}.teach-row,.answer-row,.form-grid.one{grid-template-columns:1fr;flex-direction:column}}
       </style>
       <div class="shell">
         ${this._notice ? '<div class="notice">'+this.esc(this._notice)+'</div>' : ''}
@@ -916,6 +1110,7 @@ class EsterPanel extends HTMLElement {
       </div>
     `;
     this.bind();
+    if (this._tab === "overview") requestAnimationFrame(()=>this.startNeuralCore());
   }
 }
 customElements.define("ester-panel", EsterPanel);
