@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from copy import deepcopy
 import json
 from zoneinfo import ZoneInfo
 from time import monotonic
@@ -224,7 +225,8 @@ def register_services(hass):
             async with coordinator.storage.lock:
                 plan = preview_answers(coordinator.storage.data, document)
                 if call.data.get("confirm", False) and plan:
-                    checkpoint(coordinator, "Prima di importare risposte", "question_file")
+                    snapshot = checkpoint(coordinator, "Prima di importare risposte", "question_file")
+                    snapshot["memory"]["questions"] = deepcopy(coordinator.storage.data.get("questions", []))
                     import_answers(coordinator.storage.data, document, dt_util.utcnow())
                     await coordinator.storage.async_save()
         except (ValueError, TypeError) as err:

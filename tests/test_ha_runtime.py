@@ -123,6 +123,7 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store.data, before)
         await self.hass.services.async_call("ester", "import_question_file", {"file_json": json.dumps(exported), "confirm": True}, blocking=True, return_response=True)
         self.assertEqual(store.data["preferences"]["seasonal_comfort:winter:studio"], 21)
+        self.assertEqual(store.data["memory_versions"][-1]["memory"]["questions"][0]["status"], "open")
         with self.assertRaises(ServiceValidationError):
             await self.hass.services.async_call("ester", "import_question_file", {"file_json": json.dumps(exported), "confirm": True}, blocking=True, return_response=True)
 
