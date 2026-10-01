@@ -137,7 +137,7 @@ class EsterQuestionsSensor(EsterBaseSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         questions = (self.coordinator.data or {}).get("questions", [])
-        return {"items": questions[:20]}
+        return {"items": questions}
 
 class EsterSummarySensor(EsterBaseSensor):
     """Compact UI summary, with full details available through get_summary."""

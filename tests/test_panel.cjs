@@ -12,6 +12,18 @@ const context = {HTMLElement: class {}, customElements: {define: (_, cls) => { P
   window: {SpeechRecognition: Speech}, CSS: {escape: x => x}};
 vm.runInNewContext(readFileSync('custom_components/ester/frontend/ester-panel.js', 'utf8'), context);
 (async () => {
+  const display = Object.create(Panel.prototype);
+  const older = {category:'climate',area_id:'salotto',title:'Comfort',entity_ids:['climate.room'],created_at:'2026-10-01T08:00:00Z'};
+  const newer = {...older,created_at:'2026-10-01T09:00:00Z'};
+  const otherRoom = {...older,area_id:'bagno'};
+  const original = [newer, otherRoom, older];
+  const latest = display.currentDecisions(original);
+  assert.equal(latest.length, 2);
+  assert.equal(latest.find(x=>x.area_id==='salotto'), newer);
+  assert.equal(original.length, 3);
+  display._hass = {states:{'sensor.e_s_t_e_r_summary':{attributes:{rooms:{bagno:{name:'Bagno primo piano'}}}}}};
+  assert.equal(display.roomName('bagno'), 'Bagno primo piano');
+  assert.equal(display.roomName(null), 'Casa / stanza non indicata');
   for (const id of ['teach', 'answer-test']) {
     const field = {value: 'Testo precedente'};
     const notice = {setAttribute() {}, textContent: ''};

@@ -6,6 +6,15 @@ vengono archiviate quando è disponibile quella stagionale per la stessa stanza.
 Le risposte già date sono conservate. Schede più leggibili, con spaziatura e testo
 più grandi. Il nuovo testo appare dopo riavvio e successiva valutazione.
 
+- Layout a una o due colonne con contrasto e dimensioni leggibili.
+- Nome della stanza in evidenza nelle proposte e nelle domande.
+- Proposte ripetute raggruppate nella vista senza cancellare il registro.
+- Spiegazioni richiudibili e pulsante per passare alle domande.
+- Configurazione avanzata e backup richiudibili con istruzioni per iniziare.
+- Insegna non mostra dieci schede vuote; guida il primo insegnamento.
+- Tutte le domande aperte sono accessibili: eliminato il limite invisibile di 20.
+- Anteprima del pannello con soli dati dimostrativi in examples/panel-preview.html.
+
 ### Include il caricamento file 1.4.5
 
 In INSEGNA puoi caricare più file TXT, Markdown o JSON ester-knowledge-v1.
