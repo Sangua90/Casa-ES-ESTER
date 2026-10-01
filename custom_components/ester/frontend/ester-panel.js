@@ -39,6 +39,16 @@ class EsterPanel extends HTMLElement {
     return !technical.some(x => title.includes(x) || action.includes(x));
   }
   realDecisions() { return this.history().filter(d => this.isTrueDecision(d)); }
+  roomName(area) { return this.summary().rooms?.[area]?.name || (area ? String(area).replaceAll("_", " ") : "Casa / stanza non indicata"); }
+  currentDecisions(items) {
+    const groups = new Map();
+    for (const d of items) {
+      const key = JSON.stringify([d.category, d.area_id, d.title, [...(d.entity_ids || [])].sort()]);
+      const old = groups.get(key);
+      if (!old || String(d.last_seen || d.created_at || "") >= String(old.last_seen || old.created_at || "")) groups.set(key, d);
+    }
+    return [...groups.values()];
+  }
   friendlyGap(g) {
     const raw = [g?.missing_data, g?.title, g?.benefit, g?.next_step].filter(Boolean).join(" ").toLowerCase();
     const area = g?.area_name || g?.area_id || "casa";
@@ -398,6 +408,7 @@ class EsterPanel extends HTMLElement {
 
   categoryLabel(category) {
     const labels = {
+      all:"TUTTI GLI ARGOMENTI",
       energy:"ENERGIA", climate:"CLIMA", hot_water:"ACQUA CALDA", ventilation:"VENTILAZIONE",
       lighting:"LUCI", security:"SICUREZZA", operational_safety:"SICUREZZA OPERATIVA",
       presence:"PRESENZA", irrigation:"IRRIGAZIONE", model:"MODELLO", input:"ALTRO"
@@ -406,7 +417,7 @@ class EsterPanel extends HTMLElement {
   }
 
   groupedDecisionCards(items=null) {
-    let list = (items || this.realDecisions()).slice();
+    let list = this.currentDecisions(items || this.realDecisions());
     if (!items && this._decisionCategory !== "all") list = list.filter(x=>x.category===this._decisionCategory);
     const groups = {};
     for (const d of list) {
@@ -418,7 +429,7 @@ class EsterPanel extends HTMLElement {
       <section class="domain-group">
         <div class="domain-head">
           <div>
-            <span>DOMINIO</span>
+            <span>ARGOMENTO</span>
             <h3>${this.esc(this.categoryLabel(k))}</h3>
           </div>
           <b>${groups[k].length}</b>
@@ -440,6 +451,7 @@ class EsterPanel extends HTMLElement {
         <div class="decision-head">
           <div>
             <div class="eyebrow">${this.esc(this.categoryLabel(d.category))}</div>
+            <div class="room-label">${this.esc(this.roomName(d.area_id))}</div>
             <h3>${this.esc(d.title)}</h3>
           </div>
           <div class="simple-confidence">
@@ -447,9 +459,10 @@ class EsterPanel extends HTMLElement {
             <span>${this.pct(d.confidence)}</span>
           </div>
         </div>
-        <div class="decision-section primary"><span>E.S.T.E.R. AVREBBE FATTO</span><strong>${this.esc(d.proposed_action)}</strong></div>
-        <div class="decision-section"><span>PERCHÉ</span><p>${this.esc(d.reasoning)}</p></div>
+        <div class="decision-section primary"><span>LA MIA PROPOSTA</span><strong>${this.esc(d.proposed_action)}</strong></div>
+        <details class="decision-reason"><summary>Perché questa proposta?</summary><p>${this.esc(d.reasoning)}</p></details>
         <div class="plain-explain">${this.esc(this.confidenceMeaning(d.confidence))}</div>
+        ${d.evidence?.question ? '<button data-open-tab="questions">RISPONDI ALLE DOMANDE</button>' : ''}
         ${this._advanced ? `
           <details class="tech-details" open>
             <summary>DETTAGLI TECNICI</summary>
@@ -464,7 +477,7 @@ class EsterPanel extends HTMLElement {
   }
 
   groupedQuestionCards() {
-    const items = this.questions().slice(0, 50);
+    const items = this.questions();
     if (!items.length) return '<div class="empty">Nessuna domanda aperta. E.S.T.E.R. non ha bisogno di chiarimenti in questo momento.</div>';
     const groups = {};
     for (const q of items) {
@@ -486,7 +499,7 @@ class EsterPanel extends HTMLElement {
   }
 
   questionCards(itemsArg=null) {
-    const items = (itemsArg || this.questions()).slice(0, 50);
+    const items = itemsArg || this.questions();
     if (!items.length) return '<div class="empty">Nessuna domanda aperta.</div>';
     return items.map((q,index) => {
       const title = q.display_title || q.title || "Mi serve un'informazione";
@@ -499,6 +512,7 @@ class EsterPanel extends HTMLElement {
       <article class="question-panel">
         <div class="question-index">Q${String(index+1).padStart(2,"0")}</div>
         <div class="question-main">
+          <div class="room-label">${this.esc(this.roomName(q.area_id))}</div>
           <h2>${this.esc(title)}</h2>
           <div class="question-prompt">${this.esc(prompt)}</div>
           <div class="question-context">
@@ -727,10 +741,10 @@ class EsterPanel extends HTMLElement {
         <div class="command-input"><textarea id="teach" placeholder="Per esempio: «La sera in salotto vogliamo circa 21 gradi. Se non c'è nessuno non serve scaldarlo. Le luci esterne servono quando rientriamo col buio…»"></textarea><button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button><button id="teach-send">${this._busy?"...":"CAPIRE"}</button></div>
       </section>
       ${proposal ? `<h2 class="section-title">QUELLO CHE HO CAPITO</h2><article class="control teach-review"><p>${this.esc(proposal.summary||"Controlla questi punti.")}</p><div class="knowledge-list">${(proposal.items||[]).map(x=>`<div class="knowledge-row"><b>${this.esc(labels[x.domain]||this.categoryLabel(x.domain))}</b><span>${this.esc(x.statement)}</span><small>${this.esc((x.kind||"informazione").replaceAll("_"," "))} · ${this.pct(x.confidence)}</small></div>`).join("")||'<div class="empty">Non ho estratto informazioni affidabili.</div>'}</div><div class="button-row"><button id="teach-confirm">CONFERMA E RICORDA</button><button id="teach-discard">SCARTA</button></div><p class="hint">Finché non confermi, la memoria di E.S.T.E.R. non cambia.</p></article>` : ""}
-      <h2 class="section-title">COSA SO GIÀ</h2>
-      <section class="grid">${domains.map(d=>{const items=grouped[d]||[];const cv=coverage[d]||{};return `<article class="control knowledge-domain"><div class="eyebrow">${labels[d]}</div><h3>${items.length ? "Sto imparando" : "Da insegnare"}</h3><p>${this.esc(cv.meaning|| (items.length ? "Ho già alcune informazioni su questo argomento." : "Non mi hai ancora raccontato abbastanza di questo argomento."))}</p>${items.slice(-5).map(x=>`<div class="knowledge-mini">${this.esc(x.statement||x.text||"")}</div>`).join("")}</article>`}).join("")}</section>
+      <h2 class="section-title">COSA MI HAI INSEGNATO</h2>
+      ${knowledge.length ? `<section class="grid">${domains.filter(d=>grouped[d]?.length).map(d=>{const items=grouped[d];const cv=coverage[d]||{};return `<article class="control knowledge-domain"><div class="eyebrow">${labels[d]}</div><h3>${items.length} informazioni</h3><p>${this.esc(cv.meaning|| "Ecco le informazioni conservate.")}</p>${items.slice(-5).map(x=>`<div class="knowledge-mini">${this.esc(x.statement||x.text||"")}</div>`).join("")}</article>`}).join("")}</section>` : '<article class="control"><h3>Cominciamo con una cosa semplice</h3><p>Raccontami come usate una stanza, oppure carica un file. Ti mostrerò quello che ho capito prima di salvarlo.</p></article>'}
       <h2 class="section-title">COSA MI MANCA</h2>
-      <section class="grid">${gaps.length?gaps.map(g=>`<article class="decision data-gap"><div class="eyebrow">${this.esc(labels[g.domain]||"CASA")}</div><h3>${this.esc(g.title)}</h3><p>${this.esc(g.why)}</p></article>`).join(""):'<div class="empty">Non vedo lacune importanti da chiederti adesso.</div>'}</section>
+      <section class="grid">${gaps.length?gaps.map(g=>`<article class="decision data-gap"><div class="eyebrow">${this.esc(labels[g.domain]||"CASA")}</div><h3>${this.esc(g.title)}</h3><p>${this.esc(g.why)}</p></article>`).join(""):'<div class="empty">Le domande specifiche sono nella pagina Domande. Puoi sempre aggiungere abitudini ed eccezioni qui.</div>'}</section>
     `;
   }
 
@@ -744,6 +758,9 @@ class EsterPanel extends HTMLElement {
     const gaps = this.state("sensor.e_s_t_e_r_data_suggestions")?.attributes?.items || [];
     return `
       ${this.viewHeader("CONFIG / 08","CONFIGURAZIONE","Routine, carichi, mappature, pesi decisionali e memoria.","ADMIN","ACCESS")}
+      <article class="control"><h3>Da dove iniziare</h3><p>Per raccontare come vivete la casa, apri Insegna. Per scegliere temperature e chiarire i dati mancanti, apri Domande. Qui trovi le impostazioni avanzate e i backup.</p><div class="button-row"><button data-open-tab="teach">INSEGNA LE ABITUDINI</button><button data-open-tab="questions">RISPONDI ALLE DOMANDE</button></div></article>
+      <details class="advanced-config"><summary>Apri impostazioni avanzate e backup</summary>
+      <p>Questi campi servono per configurare sensori e simulazioni. Non è necessario completarli tutti per iniziare a insegnare.</p>
       <h2 class="section-title">PESI MULTI-OBIETTIVO</h2>
       <section class="grid">
         ${weights.map(w=>`
@@ -839,11 +856,14 @@ class EsterPanel extends HTMLElement {
         <textarea readonly placeholder="Il backup JSON comparirà qui...">${this.esc(this._memoryExport || "")}</textarea>
         <textarea id="memory-import" placeholder='Incolla qui un backup JSON E.S.T.E.R.'></textarea>
         <button id="memory-import-send">IMPORTA CON SNAPSHOT PREVENTIVO</button>
+        <p class="hint">Ripristina un backup sostituendo le sezioni contenute. Per aggiungere informazioni senza sostituirle, usa il caricamento file in Insegna.</p>
       </article>
+      </details>
     `;
   }
 
   bind() {
+    this.shadowRoot?.querySelectorAll("[data-open-tab]").forEach(el => el.onclick=()=>{this._tab=el.dataset.openTab;this.render();});
     this.shadowRoot?.querySelectorAll("[data-tab]").forEach(el => {
       el.onclick = () => { this._tab = el.dataset.tab; this.render(); };
     });
@@ -1166,9 +1186,9 @@ class EsterPanel extends HTMLElement {
       `;
     } else if (this._tab === "decisions") {
       const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety"];
-      body = this.viewHeader("DECISION / 02","DECISIONI","Le scelte che E.S.T.E.R. avrebbe eseguito, ordinate per dominio.",this.pct(s.kpis?.avg_confidence),"CONFIDENCE")+'<h2 class="section-title">DECISIONI CHE E.S.T.E.R. AVREBBE PRESO</h2><article class="control decision-explainer"><p>Le decisioni sono raggruppate per tipo, così puoi leggere subito Energia, Clima, Sicurezza, Luci e gli altri domini separatamente.</p><label>Filtro dominio<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
+      body = this.viewHeader("DECISION / 02","PROPOSTE","Cosa farebbe E.S.T.E.R. e in quale stanza. Nessuna azione è stata eseguita.",this.pct(s.kpis?.avg_confidence),"FIDUCIA NEI DATI")+'<article class="control decision-explainer"><p>Mostro la proposta più recente per ogni stanza e dispositivo. Le valutazioni ripetute restano nel registro.</p><label>Mostra un argomento<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
     } else if (this._tab === "questions") {
-      body = this.viewHeader("QUESTIONS / 03","DOMANDE","Informazioni che E.S.T.E.R. ti chiede per ridurre l'incertezza.",String(questionCount),"APERTE")+'<h2 class="section-title">QUESTION INBOX · DIMMI QUELLO CHE MANCA</h2><article class="control"><p>Le domande sono raggruppate per argomento, così puoi rispondere prima a Energia, Clima, Sicurezza o agli altri gruppi senza mescolare tutto.</p></article>'+this.groupedQuestionCards();
+      body = this.viewHeader("QUESTIONS / 03","DOMANDE","Aiutami a conoscere meglio la casa, una risposta alla volta.",String(questionCount),"DA CHIARIRE")+'<article class="control"><p>Scegli una risposta proposta o scrivi con parole tue. Se non sai rispondere, scegli Non lo so: possiamo tornarci più avanti.</p></article>'+this.groupedQuestionCards();
     } else if (this._tab === "teach") {
       body = this.teachView();
     } else if (this._tab === "energy") {
@@ -1208,6 +1228,7 @@ class EsterPanel extends HTMLElement {
         .view-hud-head:before{content:"";position:absolute;inset:0;background-image:linear-gradient(#35dff708 1px,transparent 1px),linear-gradient(90deg,#35dff708 1px,transparent 1px);background-size:22px 22px;mask-image:linear-gradient(90deg,transparent,#000 15%,#000 85%,transparent)}
         .mini-reactor{position:relative;width:86px;height:86px;border-radius:50%;display:grid;place-items:center}.mini-ring{position:absolute;border:1px solid #54eaff;border-radius:50%;box-shadow:0 0 12px #00dfff38}.mini-ring.a{inset:0;border-style:dashed;animation:spin 14s linear infinite}.mini-ring.b{inset:17%;animation:spin 7s linear reverse infinite}.mini-ring.c{inset:32%;border-style:dotted}.mini-core{width:22px;height:22px;border-radius:50%;background:#c8fcff;box-shadow:0 0 15px #fff,0 0 38px #00eaff}
         .view-copy{position:relative;z-index:1}.view-copy p{margin:6px 0;color:#79aeb8}.view-title{margin:3px 0;font:300 clamp(28px,4vw,52px)/1 monospace;letter-spacing:.12em;color:#e8fdff;text-shadow:0 0 16px #49eaff55}.view-metric{position:relative;z-index:1;text-align:right;border-right:1px solid #54eaff55;padding-right:14px}.view-metric span{display:block;font:8px monospace;letter-spacing:.22em;color:#4caaba}.view-metric b{display:block;margin:5px 0;font:300 24px monospace;color:#c9fbff}.view-metric i{display:block;margin-left:auto;width:70%;height:1px;background:linear-gradient(90deg,transparent,#52eaff)}
+        .question-stack{display:grid;gap:20px;margin:16px 0 30px}.question-panel{padding:24px}.question-index{font-size:12px;color:#8ecbd5;margin-bottom:12px}.question-main h2{font-size:22px;margin:0 0 16px}.question-prompt{font-size:19px;line-height:1.5;margin-bottom:20px;color:#efffff}.question-context{padding:14px 16px;background:#06212b;margin-bottom:16px;line-height:1.5}.question-context span{font-size:12px;color:#76dfea}.question-context p{margin:8px 0 0}.question-panel details{margin:14px 0;line-height:1.5}.question-panel summary{cursor:pointer;color:#9ad5df}.answer-console{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.answer-console input{flex:1;min-width:200px;font-size:16px;padding:12px}.question-panel .quick{font-size:14px;padding:10px 14px}
         .hud-panel,.control,.health,.decision,.question-panel,.migration,.model,.energy-core{position:relative;border:0!important;border-top:1px solid #4eeaff40!important;border-bottom:1px solid #4eeaff1e!important;background:linear-gradient(90deg,transparent,#04161dc4 7%,#04161dc4 93%,transparent)!important;border-radius:0!important;clip-path:polygon(0 9px,9px 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%);box-shadow:none!important}
         .hud-panel:before,.control:before,.health:before,.decision:before,.question-panel:before{content:"";position:absolute;left:0;top:22%;bottom:22%;width:2px;background:#51ecff;box-shadow:0 0 10px #00dfff88}
         .panel-orbit{position:relative;width:112px;height:112px;min-width:112px;border-radius:50%;display:grid;place-items:center;align-content:center}.panel-orbit .panel-ring{position:absolute;inset:5px;border:1px dashed #4ceaff99;border-radius:50%;animation:spin 16s linear infinite;box-shadow:0 0 15px #00dfff25}.panel-orbit:after{content:"";position:absolute;inset:24px;border:1px solid #4ceaff55;border-radius:50%}.panel-orbit b{font:300 24px monospace;color:#d5fdff;z-index:1}.panel-orbit span{font:7px monospace;letter-spacing:.16em;color:#55aeba;z-index:1}.panel-body{flex:1;min-width:0}.model,.migration{display:flex;gap:20px;align-items:center}.model h3,.migration h3{font:400 20px monospace;letter-spacing:.08em}.model details{margin-top:12px;color:#629da8}.model summary{cursor:pointer;font:9px monospace;letter-spacing:.14em;color:#55b8c8}.signal-line{height:2px;background:#0a2b34;margin:14px 0}.signal-line span{display:block;height:100%;background:#54ebff;box-shadow:0 0 10px #54ebff}
@@ -1277,6 +1298,22 @@ class EsterPanel extends HTMLElement {
           input,select,textarea,button{max-width:100%}
           pre,.code,.technical{max-width:100%;overflow-x:auto;white-space:pre-wrap;overflow-wrap:anywhere}
         }
+        /* Readable default layout, including on wide desktop screens. */
+        :host{font-size:17px;line-height:1.55;color:#e3f5f8}
+        .shell{max-width:1200px;padding:24px 28px 60px}
+        .grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:24px}
+        .form-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:18px}
+        .domain-group{margin:30px 0}.domain-head{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #54dbea44;margin:0 0 18px;padding-bottom:10px}.domain-head span{display:none}.domain-head h3{margin:0;font-size:20px}.domain-head b{font-size:16px;color:#bbdce2}
+        .room-label{font-size:19px;font-weight:600;color:#8feaff;margin:8px 0}
+        .eyebrow,.hint,.tech-details summary,.simple-status-grid span{font-size:14px;letter-spacing:.03em;color:#b3d3dc}
+        .section-title{font-size:17px!important;letter-spacing:.07em!important}.decision-section span{font-size:13px;color:#9cdde8;letter-spacing:.05em}
+        .decision,.question-panel,.control,.migration,.model{padding:24px!important;background:#081d27!important;clip-path:none!important;border-radius:12px!important;border:1px solid #56b7c342!important}
+        .decision h3,.control h3{font-size:21px;line-height:1.35}.decision p,.control p,.question-panel p,.empty,.plain-explain{font-size:16px;color:#c1dce3;line-height:1.6}
+        .simple-confidence b{font:500 13px/1.4 Inter,Roboto,sans-serif;letter-spacing:0}.simple-confidence span{font-size:22px}.decision-section.primary strong{font-size:19px}.decision-reason{margin:16px 0}.decision-reason summary{cursor:pointer;color:#9fe9f3}
+        button{font-size:15px;min-height:44px;letter-spacing:.025em}input,select,textarea{font:inherit;min-height:44px}textarea{width:100%;min-height:140px}.command-input{grid-template-columns:1fr auto auto}.command-input textarea{min-height:140px;font:inherit}.command-head span{display:none}.command-head b{font-size:16px;letter-spacing:.04em}
+        .advanced-config{margin:24px 0}.advanced-config>summary{cursor:pointer;padding:20px;background:#0c2935;border:1px solid #63dceb55;border-radius:12px;font-size:18px}
+        .view-copy p{font-size:17px;color:#c1dce3}.view-metric span{font-size:12px;letter-spacing:.04em}.view-hud-head{min-height:125px}.knowledge-mini{padding:14px 0;border-bottom:1px solid #4bccdb30;line-height:1.6}.notice{position:sticky;top:8px;z-index:10;padding:16px;background:#123b49;border:1px solid #74e9ef;border-radius:10px;font-size:17px}
+        @media(max-width:720px){.shell{padding:12px 14px 40px}.grid,.form-grid,.command-input{grid-template-columns:1fr!important}.decision,.question-panel,.control{padding:18px!important}.decision-head{flex-wrap:wrap}.simple-confidence{text-align:left}.simple-confidence span{display:inline;margin-left:10px}.simple-confidence b{display:inline}.view-hud-head{grid-template-columns:1fr!important}.mini-reactor{display:none}.view-metric{text-align:left}.view-title{font-size:28px}.answer-console input{min-width:0;width:100%;flex-basis:100%}}
       </style>
       <div class="shell">
         ${this._notice ? '<div class="notice">'+this.esc(this._notice)+'</div>' : ''}

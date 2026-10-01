@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="it"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>E.S.T.E.R. — anteprima con dati dimostrativi</title>
+<body style="margin:0;background:#03080d"><script src="../custom_components/ester/frontend/ester-panel.js"></script><script>
+const panel = document.createElement('ester-panel');
+const decisions = ['salotto','bagno'].map(area=>({category:'climate',area_id:area,title:'Comfort da definire',proposed_action:'Scegliere una temperatura iniziale per il riscaldamento',reasoning:'La stanza ha un termometro ma non conosco ancora le tue preferenze.',confidence:.4,created_at:'2026-10-01T09:00:00Z',entity_ids:['climate.'+area],evidence:{question:'Quale temperatura preferisci?'}}));
+const questions = decisions.map((d,i)=>({question_id:'q'+i,category:'climate',area_id:d.area_id,display_title:'Temperatura desiderata',display_prompt:'Partiamo da 20 °C per il riscaldamento?',why_asking:'È un punto di partenza da provare. Puoi cambiarlo se senti caldo o freddo.',answer_hint:'Conferma oppure scrivi il valore che preferisci.',quick_answers:['20 °C','19 °C','21 °C','Non lo so'],prompt:'Quale comfort?',confidence:.4}));
+panel._tab = new URLSearchParams(location.search).get('tab') || 'decisions';
+panel.hass = {language:'it',states:{'sensor.e_s_t_e_r_summary':{attributes:{rooms:{salotto:{name:'Salotto'},bagno:{name:'Bagno al primo piano'}},decision_history:decisions,knowledge_items:[],knowledge_coverage:{},knowledge_gaps:[],season:{season:'winter'}}},'sensor.e_s_t_e_r_questions':{state:'2',attributes:{items:questions}},'sensor.e_s_t_e_r_shadow_decisions':{state:'2',attributes:{latest:decisions}}},callService:async()=>{throw Error('Anteprima: nessun servizio collegato');},callWS:async()=>{throw Error('Anteprima: nessun servizio collegato');}};
+document.body.append(panel);
+</script></body></html>

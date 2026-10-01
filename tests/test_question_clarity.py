@@ -4,6 +4,24 @@ import unittest
 
 
 class QuestionClarityTests(unittest.TestCase):
+    def test_old_questions_refresh_without_losing_answers(self):
+        old = {"question_id": "old", "category": "energy", "prompt": "Usa classify_entity", "status": "open"}
+        answered = {"question_id": "done", "category": "climate", "status": "answered", "answer": "21 °C"}
+        questions.merge_questions([old, answered], [], NOW)
+        self.assertNotIn("classify_entity", old["display_prompt"])
+        self.assertIn("Non lo so", old["quick_answers"])
+        self.assertEqual(answered["answer"], "21 °C")
+        self.assertEqual(answered["status"], "answered")
+
+    def test_seasonal_question_retires_legacy_comfort_only(self):
+        old = {"question_id": "old", "category": "climate", "area_id": "salotto", "title": "Comfort da definire", "prompt": "Quale comfort?", "status": "open"}
+        sensor = {"question_id": "sensor", "category": "climate", "area_id": "salotto", "title": "Sensore", "prompt": "Quale sensore?", "status": "open"}
+        decision = {"decision_id": "d", "category": "climate", "area_id": "salotto", "title": "Comfort da definire", "reasoning": "", "confidence": .4, "risk": "low", "evidence": {"question": "Quale comfort (winter)?", "comfort_season": "winter", "season_source": "calendar"}}
+        _, new = questions.merge_questions([old, sensor], [decision], NOW)
+        self.assertEqual(old["status"], "superseded")
+        self.assertEqual(sensor["status"], "open")
+        self.assertIn("20 °C", new[0]["display_prompt"])
+
     def test_seasonal_suggestion_only_learns_on_confirmation(self):
         for season, degrees in (("winter", 20), ("summer", 26), ("shoulder", 20)):
             decision = {"decision_id": "d", "category": "climate", "area_id": "salotto",
