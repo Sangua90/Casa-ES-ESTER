@@ -1,3 +1,18 @@
+## E.S.T.E.R. 1.4.8 — Caricamento reale in INSEGNA
+
+- Selezione di uno o più file, elenco visibile e pulsante CARICA.
+- Upload multipart autenticato in Home Assistant, progresso e messaggi di errore.
+- Documenti persistenti, anteprima e conferma nella pipeline di conoscenza esistente.
+- File omonimi senza sovrascritture; ricaricamenti senza conoscenze duplicate.
+- Selezione conservata dopo errori e menu mobile stabile durante aggiornamenti HA.
+- Shadow Mode invariato: nessuna attuazione fisica e nessun invio AI durante upload.
+
+Verificato su Home Assistant 2026.9.4 con upload HTTP, autenticazione, conferma,
+ricaricamento dello storage e browser WebKit con profilo iPhone 13.
+La verifica non è stata eseguita sull'impianto domestico né su un iPhone fisico.
+Aggiorna da HACS, riavvia Home Assistant e ricarica E.S.T.E.R.
+Formati e limiti: docs/KNOWLEDGE_FILES.md.
+
 ## E.S.T.E.R. 1.4.7 — Domande e risposte da file
 
 - Esporta tutte le domande aperte in un JSON da spiegare e compilare con ChatGPT.

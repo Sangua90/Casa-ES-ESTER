@@ -9,6 +9,9 @@ class EsterPanel extends HTMLElement {
     this._advanced = false;
     this._notice = "";
     this._teachDraft = null;
+    this._knowledgeFiles = [];
+    this._uploadProgress = 0;
+    this._uploadStatus = "";
     this._neuralFrame = 0;
     this._neuralResize = null;
     this._neuralStartedAt = 0;
@@ -156,13 +159,16 @@ class EsterPanel extends HTMLElement {
       const response = result?.response || result || {};
       this._teachDraft = null;
       this._notice = response?.summary || "Conoscenze salvate.";
-      await this._hass.callService("ester","evaluate",{});
+      if (this._uploadProgress === 100) this.updateUploadStatus(this._notice);
+      try { await this._hass.callService("ester","evaluate",{}); }
+      catch (_) { this._notice += " La schermata si aggiornerà alla prossima valutazione."; }
     } catch (err) {
       this._notice = "Non ho salvato nulla: " + (err?.message || "errore");
     } finally { this._busy=false; this.render(); }
   }
 
   async discardTeach() {
+    if (this._busy) return;
     const token = this._teachDraft?.proposal_id;
     if (token && this._hass) {
       try { await this._hass.callService("ester","discard_teaching",{proposal_id:token}); } catch (_) {}
@@ -741,18 +747,67 @@ class EsterPanel extends HTMLElement {
       </article>`;
   }
 
-  async previewKnowledgeFiles() {
+  selectKnowledgeFiles(files) {
     if (this._busy) return;
-    const selected = Array.from(this.shadowRoot.querySelector("#knowledge-files")?.files || []);
+    this._knowledgeFiles = Array.from(files || []);
+    this._uploadProgress = 0;
+    this._uploadStatus = this._knowledgeFiles.length ? "File selezionati. Premi CARICA per inviarli." : "";
+    this.render();
+  }
+
+  updateUploadStatus(message, progress = this._uploadProgress) {
+    this._uploadStatus = message;
+    this._uploadProgress = progress;
+    const status = this.shadowRoot?.querySelector("#knowledge-upload-status");
+    if (status) status.textContent = message;
+    const bar = this.shadowRoot?.querySelector("#knowledge-upload-progress");
+    if (bar) bar.value = progress;
+  }
+
+  async uploadKnowledgeFiles() {
+    if (this._busy) return;
+    const selected = this._knowledgeFiles || [];
     this._busy = true;
     try {
       if (!selected.length || selected.length > 5) throw Error("Scegli da uno a cinque file.");
-      if (selected.some(f => f.size > 32000) || selected.reduce((n,f)=>n+f.size,0) > 64000) throw Error("Limite: 32 KB per file, 64 KB complessivi.");
-      const files = await Promise.all(selected.map(async f => ({name:f.name, content:await f.text()})));
-      const result = await this._hass.callWS({type:"call_service", domain:"ester", service:"preview_knowledge_files", service_data:{files_json:JSON.stringify(files)}, return_response:true});
-      this._teachDraft = result?.response || result;
-      this._notice = "Controlla l'anteprima. Nulla è stato aggiunto alle conoscenze finché non confermi.";
-    } catch (err) { this._notice = "File non caricati: " + (err?.message || "errore"); }
+      if (selected.some(f => !/\.(json|txt|md)$/i.test(f.name))) throw Error("Sono supportati file JSON, TXT e Markdown.");
+      if (selected.some(f => !f.size || f.size > 32000) || selected.reduce((n,f)=>n+f.size,0) > 64000) throw Error("Limite: file non vuoti, 32 KB per file, 64 KB complessivi.");
+      this.updateUploadStatus("Caricamento in corso…", 0);
+      this.render();
+      const auth = this._hass.auth;
+      if (!auth) throw Error("Sessione non disponibile. Riapri il pannello da Home Assistant.");
+      if (auth.expired) await auth.refreshAccessToken();
+      const body = new FormData();
+      selected.forEach(file => body.append("files", file, file.name));
+      const result = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", this._hass.hassUrl("api/ester/knowledge/upload"));
+        xhr.setRequestHeader("Authorization", `Bearer ${auth.accessToken}`);
+        xhr.responseType = "json";
+        xhr.timeout = 60000;
+        xhr.upload.onprogress = event => {
+          if (event.lengthComputable) {
+            const progress = Math.round(event.loaded / event.total * 100);
+            this.updateUploadStatus(progress < 100 ? `Caricamento ${progress}%` : "File inviati. Validazione in Home Assistant…", progress);
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300 && xhr.response?.proposal?.proposal_id) resolve(xhr.response);
+          else reject(Error(xhr.response?.error || (xhr.status === 401 ? "Sessione scaduta. Riapri Home Assistant." : `Caricamento rifiutato (${xhr.status}).`)));
+        };
+        xhr.onerror = () => reject(Error("Connessione interrotta. Controlla la rete e riprova."));
+        xhr.ontimeout = () => reject(Error("Tempo scaduto. Puoi riprovare: le conoscenze non vengono duplicate."));
+        xhr.onabort = () => reject(Error("Caricamento interrotto."));
+        xhr.send(body);
+      });
+      this._teachDraft = result.proposal;
+      this._knowledgeFiles = [];
+      this.updateUploadStatus(`${result.uploaded_files.length} file caricati e verificati. Controlla l'anteprima e conferma per ricordarli.`, 100);
+      this._notice = this._uploadStatus;
+    } catch (err) {
+      this.updateUploadStatus("File non caricati: " + (err?.message || "errore"), 0);
+      this._notice = this._uploadStatus;
+    }
     finally { this._busy = false; this.render(); }
   }
 
@@ -771,8 +826,12 @@ class EsterPanel extends HTMLElement {
         <article class="control">
           <h3>Aggiungi conoscenze da file</h3>
           <p>Carica racconti della casa o descrizioni delle automazioni. Le nuove informazioni si aggiungono: quelle esistenti rimangono. I duplicati esatti vengono ignorati. Le descrizioni non vengono eseguite come automazioni.</p>
-          <input id="knowledge-files" type="file" multiple accept=".json,.txt,.md" aria-label="File di conoscenza" />
-          <button id="knowledge-files-preview" ${this._busy ? "disabled" : ""}>MOSTRA ANTEPRIMA</button>
+          <label for="knowledge-files">AGGIUNGI UNO O PIÙ FILE</label>
+          <input id="knowledge-files" type="file" multiple accept=".json,.txt,.md" aria-label="Aggiungi uno o più file di conoscenza" ${this._busy ? "disabled" : ""} />
+          <ul class="upload-files">${(this._knowledgeFiles || []).map(f=>`<li>${this.esc(f.name)} · ${f.size} byte</li>`).join("")}</ul>
+          <button id="knowledge-files-upload" ${this._busy || !this._knowledgeFiles?.length ? "disabled" : ""}>${this._busy ? "CARICAMENTO…" : "CARICA"}</button>
+          <progress id="knowledge-upload-progress" max="100" value="${this._uploadProgress || 0}" aria-label="Progresso caricamento"></progress>
+          <p id="knowledge-upload-status" role="status" aria-live="polite">${this.esc(this._uploadStatus || "Nessun file selezionato.")}</p>
           <p class="hint">JSON E.S.T.E.R., TXT o Markdown. Massimo 5 file, 32 KB ciascuno. Lettura locale senza invio al provider AI; le conoscenze confermate possono poi essere usate come contesto dal provider configurato.</p>
         </article>
         <div class="command-head"><span>VOCE / TESTO</span><b>RACCONTA A E.S.T.E.R.</b></div>
@@ -934,8 +993,10 @@ class EsterPanel extends HTMLElement {
     const snapshot = this.shadowRoot?.querySelector("#snapshot-create");
     if (snapshot) snapshot.onclick=()=>this.snapshot();
     const memoryExport = this.shadowRoot?.querySelector("#memory-export");
-    const knowledgeFiles = this.shadowRoot?.querySelector("#knowledge-files-preview");
-    if (knowledgeFiles) knowledgeFiles.onclick=()=>this.previewKnowledgeFiles();
+    const knowledgeFiles = this.shadowRoot?.querySelector("#knowledge-files-upload");
+    if (knowledgeFiles) knowledgeFiles.onclick=()=>this.uploadKnowledgeFiles();
+    const knowledgeInput = this.shadowRoot?.querySelector("#knowledge-files");
+    if (knowledgeInput) knowledgeInput.onchange=()=>this.selectKnowledgeFiles(knowledgeInput.files);
     if (memoryExport) memoryExport.onclick=()=>this.exportMemory();
     const memoryImport = this.shadowRoot?.querySelector("#memory-import-send");
     if (memoryImport) memoryImport.onclick=()=>this.importMemory();
@@ -1359,6 +1420,12 @@ class EsterPanel extends HTMLElement {
         .advanced-config{margin:24px 0}.advanced-config>summary{cursor:pointer;padding:20px;background:#0c2935;border:1px solid #63dceb55;border-radius:12px;font-size:18px}
         .view-copy p{font-size:17px;color:#c1dce3}.view-metric span{font-size:12px;letter-spacing:.04em}.view-hud-head{min-height:125px}.knowledge-mini{padding:14px 0;border-bottom:1px solid #4bccdb30;line-height:1.6}.notice{position:sticky;top:8px;z-index:10;padding:16px;background:#123b49;border:1px solid #74e9ef;border-radius:10px;font-size:17px}
         @media(max-width:720px){.shell{padding:12px 14px 40px}.grid,.form-grid,.command-input{grid-template-columns:1fr!important}.decision,.question-panel,.control{padding:18px!important}.decision-head{flex-wrap:wrap}.simple-confidence{text-align:left}.simple-confidence span{display:inline;margin-left:10px}.simple-confidence b{display:inline}.view-hud-head{grid-template-columns:1fr!important}.mini-reactor{display:none}.view-metric{text-align:left}.view-title{font-size:28px}.answer-console input{min-width:0;width:100%;flex-basis:100%}}
+        .upload-files{padding-left:20px;overflow-wrap:anywhere;line-height:1.7}
+        #knowledge-files{display:block;width:100%;max-width:100%;min-height:48px;font-size:16px;margin:12px 0;box-sizing:border-box}
+        #knowledge-files::file-selector-button{min-height:44px;padding:8px 12px;font-size:16px}
+        #knowledge-files-upload{min-height:48px;min-width:120px;margin:8px 0}
+        #knowledge-upload-progress{display:block;width:100%;height:18px;margin-top:12px;accent-color:#74e9ef}
+        #knowledge-upload-status{overflow-wrap:anywhere}
       </style>
       <div class="shell">
         ${this._notice ? '<div class="notice">'+this.esc(this._notice)+'</div>' : ''}

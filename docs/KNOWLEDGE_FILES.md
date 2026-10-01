@@ -1,10 +1,19 @@
 # Aggiungere informazioni senza sostituire la memoria
 
 In **INSEGNA → Aggiungi conoscenze da file**, scegli uno o più file,
-premi **MOSTRA ANTEPRIMA**, controlla i punti e premi **CONFERMA E RICORDA**.
+controlla l'elenco dei file selezionati e premi **CARICA**. La barra mostra il
+trasferimento; al 100% attendi la validazione in Home Assistant. Poi controlla
+i punti nell'anteprima e premi **CONFERMA E RICORDA**.
 Non usare **Importa memoria**, che serve a ripristinare un backup.
 
-La lettura dei file è locale. Le informazioni confermate entrano nella conoscenza
+I file vengono inviati al backend Home Assistant tramite upload autenticato,
+riservato agli amministratori. Il caricamento conserva i documenti nella proposta
+persistente; la conferma archivia gli originali utili nella memoria locale
+`knowledge_documents`, identificati dall'impronta del contenuto, senza usare il
+nome come percorso su disco. Le proposte in attesa sono limitate alle ultime 20.
+Gli originali sono conservati nello storage locale, mentre l'esportazione portabile
+della memoria contiene le conoscenze estratte con la loro fonte.
+Il caricamento non invia documenti al provider AI. Le informazioni confermate entrano nella conoscenza
 usata come contesto dal provider AI configurato durante gli insegnamenti successivi.
 Non vengono eseguite automazioni né modificate preferenze numeriche o mappature.
 Non tutte le note sono già utilizzate dai motori decisionali deterministici.
@@ -46,6 +55,12 @@ tra caricamenti diversi. Testi diversi, anche contraddittori, rimangono distinti
 non sostituiamo automaticamente informazioni precedenti. Nome e impronta del file
 sono conservati per risalire alla fonte. Se non c'è spazio entro il limite di
 1000 conoscenze, l'aggiunta viene rifiutata senza cancellare quelle esistenti.
+
+File omonimi con contenuto diverso possono essere caricati insieme. Ricaricare
+lo stesso file, anche rinominato, non duplica le informazioni. Informazioni nuove
+in un file con nome già usato vengono aggiunte dopo conferma. Un errore conserva
+la selezione per riprovare; una disconnessione non aggiunge conoscenze attive.
+Gli originali e le conoscenze confermate rimangono dopo il riavvio.
 
 Per una nuova chat: «Trasforma le mie descrizioni in uno o più file JSON
 ester-knowledge-v1 seguendo docs/KNOWLEDGE_FILES.md del repository

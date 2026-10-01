@@ -4,9 +4,31 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import datetime, UTC
 from uuid import uuid4
 
 from .language import KNOWLEDGE_DOMAINS, KNOWLEDGE_KINDS
+
+
+async def prepare_documents(coordinator, documents: list) -> dict:
+    """Persist a validated batch and its proposal, without modifying active knowledge."""
+    items = parse_documents(documents)
+    async with coordinator.storage.lock:
+        new = additions(coordinator.storage.data.get("knowledge", []), items)
+        proposal = {"proposal_id": str(uuid4()), "created_at": datetime.now(UTC).isoformat(),
+                    "source": "knowledge_files", "provider": "local", "items": new,
+                    "documents": documents,
+                    "summary": f"{len(new)} nuove informazioni da aggiungere; {len(items)-len(new)} duplicati ignorati. Nessuna sostituzione."}
+        pending = coordinator.storage.data.setdefault("pending_teachings", [])
+        previous = list(pending)
+        pending.append(proposal)
+        del pending[:-20]
+        try:
+            await coordinator.storage.async_save()
+        except Exception:
+            coordinator.storage.data["pending_teachings"] = previous
+            raise
+    return {k: v for k, v in {**proposal, "memory_changed": False, "device_action": False}.items() if k != "documents"}
 
 
 def identity(item: dict) -> tuple:
@@ -53,7 +75,7 @@ def parse_documents(files: list) -> list[dict]:
             if not isinstance(statement, str) or not 1 <= len(statement.strip()) <= 1000:
                 raise ValueError("Dividi il testo in paragrafi da 1 a 1000 caratteri.")
             domain, kind = row.get("domain", "other"), row.get("kind", "fact")
-            if domain not in KNOWLEDGE_DOMAINS or kind not in KNOWLEDGE_KINDS:
+            if not isinstance(domain, str) or not isinstance(kind, str) or domain not in KNOWLEDGE_DOMAINS or kind not in KNOWLEDGE_KINDS:
                 raise ValueError("Argomento o tipo di informazione non riconosciuto.")
             area = row.get("area_id", "")
             if not isinstance(area, str) or len(area) > 100:
@@ -86,4 +108,12 @@ def append_documents(store: dict, proposal: dict, now) -> list[dict]:
               "created_at": now.isoformat(), "updated_at": now.isoformat(),
               "status": "active", "scope": "persistent"} for row in rows]
     store.setdefault("knowledge", []).extend(saved)
+    documents = store.setdefault("knowledge_documents", [])
+    digests = {row["source_digest"] for row in saved}
+    existing = {d["digest"] for d in documents}
+    for document in proposal.get("documents", []):
+        digest = hashlib.sha256(document["content"].encode("utf-8")).hexdigest()
+        if digest in digests and digest not in existing:
+            documents.append({**document, "digest": digest, "uploaded_at": proposal["created_at"]})
+            existing.add(digest)
     return saved
