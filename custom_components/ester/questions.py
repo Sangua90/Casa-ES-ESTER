@@ -130,6 +130,7 @@ def question_from_decision(decision: dict, now: datetime) -> dict | None:
         "answer": None,
         "interpretation": None,
         "comfort_season": (decision.get("evidence") or {}).get("comfort_season"),
+        "season_source": (decision.get("evidence") or {}).get("season_source"),
         **friendly,
     }
 
@@ -143,6 +144,10 @@ def merge_questions(existing: list[dict], decisions: list[dict], now: datetime) 
     created = []
     latest = {}
     for question in existing:
+        if question.get("status") == "open":
+            # Refresh presentation even when the originating proposal has changed.
+            evidence = {"comfort_season": question.get("comfort_season"), "season_source": question.get("season_source", "calendar")}
+            question.update(_friendly_question({**question, "evidence": evidence}, question.get("prompt", "")))
         key = _stable_key(question)
         updated = question.get("updated_at") or question.get("created_at")
         try:
@@ -157,6 +162,14 @@ def merge_questions(existing: list[dict], decisions: list[dict], now: datetime) 
         item = question_from_decision(decision, now)
         if item is None:
             continue
+        if item.get("comfort_season"):
+            for old in existing:
+                if (old.get("status") == "open" and old.get("category") == "climate"
+                        and old.get("area_id") == item.get("area_id")
+                        and not old.get("comfort_season")
+                        and "comfort" in ((old.get("title") or "") + (old.get("prompt") or "")).lower()):
+                    old["status"] = "superseded"
+                    old["updated_at"] = now.isoformat()
         key = _stable_key(item)
         previous = latest.get(key)
         if previous:
@@ -167,7 +180,7 @@ def merge_questions(existing: list[dict], decisions: list[dict], now: datetime) 
                 question["decision_id"] = item["decision_id"]
                 for field in (
                     "display_title", "display_prompt", "observed",
-                    "why_asking", "answer_hint", "quick_answers", "comfort_season",
+                    "why_asking", "answer_hint", "quick_answers", "comfort_season", "season_source",
                 ):
                     question[field] = item.get(field)
                 continue

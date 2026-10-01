@@ -1,4 +1,12 @@
-## E.S.T.E.R. 1.4.5 — Aggiungi conoscenze da file
+## E.S.T.E.R. 1.4.6 — Aggiornamento domande salvate
+
+Le domande aperte ricevono le spiegazioni aggiornate anche quando la proposta
+originale non viene più generata. Le vecchie domande generiche sul comfort
+vengono archiviate quando è disponibile quella stagionale per la stessa stanza.
+Le risposte già date sono conservate. Schede più leggibili, con spaziatura e testo
+più grandi. Il nuovo testo appare dopo riavvio e successiva valutazione.
+
+### Include il caricamento file 1.4.5
 
 In INSEGNA puoi caricare più file TXT, Markdown o JSON ester-knowledge-v1.
 Anteprima e conferma aggiungono le informazioni senza sostituire quelle esistenti.
