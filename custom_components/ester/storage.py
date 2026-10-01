@@ -28,6 +28,7 @@ class EsterStorage:
             "usage_profiles": [],
             "questions": [],
             "knowledge": [],
+            "knowledge_documents": [],
             "pending_teachings": [],
             "safety_policies": {},
             "fallback_policies": {},

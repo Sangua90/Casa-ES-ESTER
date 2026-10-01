@@ -24,7 +24,7 @@ from .questions import apply_answer
 from .question_files import export_questions, preview_answers, import_answers
 from .language_pipeline import interpret_and_store
 from .language import store_teaching_items
-from .knowledge_files import parse_documents, additions, append_documents
+from .knowledge_files import prepare_documents, append_documents
 from .snapshots import create_snapshot, restore_snapshot, portable_memory
 from .replay import run_historical_replay
 from .scenario import simulate_scenario
@@ -271,17 +271,8 @@ def register_services(hass):
     async def preview_knowledge_files(call):
         coordinator = runtime()
         try:
-            items = parse_documents(json.loads(call.data["files_json"]))
-            async with coordinator.storage.lock:
-                new = additions(coordinator.storage.data.get("knowledge", []), items)
-                proposal = {"proposal_id": str(uuid4()), "created_at": dt_util.utcnow().isoformat(),
-                            "source": "knowledge_files", "provider": "local", "items": new,
-                            "summary": f"{len(new)} nuove informazioni da aggiungere; {len(items)-len(new)} duplicati ignorati. Nessuna sostituzione."}
-                pending = coordinator.storage.data.setdefault("pending_teachings", [])
-                pending.append(proposal)
-                del pending[:-20]
-                await coordinator.storage.async_save()
-            return {**proposal, "memory_changed": False, "device_action": False}
+            documents = json.loads(call.data["files_json"])
+            return await prepare_documents(coordinator, documents)
         except (ValueError, TypeError) as err:
             raise ServiceValidationError(str(err)) from None
 
@@ -292,15 +283,22 @@ def register_services(hass):
             pending=coordinator.storage.data.setdefault("pending_teachings",[])
             proposal=next((p for p in pending if p.get("proposal_id")==proposal_id),None)
             if proposal is None: raise ServiceValidationError("Unknown or expired teaching proposal")
+            previous = deepcopy(coordinator.storage.data)
             checkpoint(coordinator,"Prima di confermare insegnamento",proposal.get("original_text","")[:200])
             try:
                 saved = (append_documents(coordinator.storage.data, proposal, dt_util.utcnow())
                          if proposal.get("source") == "knowledge_files" else
                          store_teaching_items(coordinator.storage.data,proposal,dt_util.utcnow()))
+                coordinator.storage.data["pending_teachings"]=[p for p in pending if p.get("proposal_id")!=proposal_id]
+                await coordinator.storage.async_save()
             except ValueError as err:
+                coordinator.storage.data.clear()
+                coordinator.storage.data.update(previous)
                 raise ServiceValidationError(str(err)) from None
-            coordinator.storage.data["pending_teachings"]=[p for p in pending if p.get("proposal_id")!=proposal_id]
-            await coordinator.storage.async_save()
+            except Exception:
+                coordinator.storage.data.clear()
+                coordinator.storage.data.update(previous)
+                raise
         await coordinator.async_request_refresh()
         return {"saved":len(saved),"summary":f"Ho memorizzato {len(saved)} informazioni confermate.","items":saved}
 

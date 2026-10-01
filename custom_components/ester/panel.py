@@ -5,6 +5,7 @@ from pathlib import Path
 
 from homeassistant.components import frontend
 from homeassistant.components.http import StaticPathConfig
+from .knowledge_upload import KnowledgeUploadView
 
 PANEL_URL = "ester"
 STATIC_URL = "/ester_static"
@@ -14,6 +15,7 @@ PANEL_ELEMENT = "ester-panel"
 async def async_setup_panel_assets(hass) -> None:
     """Register static frontend assets once during integration setup."""
     frontend_dir = Path(__file__).parent / "frontend"
+    hass.http.register_view(KnowledgeUploadView())
     await hass.http.async_register_static_paths(
         [StaticPathConfig(STATIC_URL, str(frontend_dir), False)]
     )
