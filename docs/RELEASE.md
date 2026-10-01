@@ -1,4 +1,11 @@
-## E.S.T.E.R. 1.4.4 — Domande più semplici
+## E.S.T.E.R. 1.4.5 — Aggiungi conoscenze da file
+
+In INSEGNA puoi caricare più file TXT, Markdown o JSON ester-knowledge-v1.
+Anteprima e conferma aggiungono le informazioni senza sostituire quelle esistenti.
+Duplicati ignorati, fonte conservata e nessuna esecuzione delle automazioni descritte.
+Vedi docs/KNOWLEDGE_FILES.md per il formato e i limiti.
+
+### Include le correzioni 1.4.4
 
 - Domande più chiare e dettagli tecnici richiudibili.
 - Comfort proposto: 20 °C per riscaldamento/mezza stagione, 26 °C per raffrescamento. Punti di partenza modificabili, salvati solo dopo conferma e separati per stagione.

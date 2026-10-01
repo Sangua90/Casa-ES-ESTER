@@ -688,6 +688,21 @@ class EsterPanel extends HTMLElement {
       </article>`;
   }
 
+  async previewKnowledgeFiles() {
+    if (this._busy) return;
+    const selected = Array.from(this.shadowRoot.querySelector("#knowledge-files")?.files || []);
+    this._busy = true;
+    try {
+      if (!selected.length || selected.length > 5) throw Error("Scegli da uno a cinque file.");
+      if (selected.some(f => f.size > 32000) || selected.reduce((n,f)=>n+f.size,0) > 64000) throw Error("Limite: 32 KB per file, 64 KB complessivi.");
+      const files = await Promise.all(selected.map(async f => ({name:f.name, content:await f.text()})));
+      const result = await this._hass.callWS({type:"call_service", domain:"ester", service:"preview_knowledge_files", service_data:{files_json:JSON.stringify(files)}, return_response:true});
+      this._teachDraft = result?.response || result;
+      this._notice = "Controlla l'anteprima. Nulla è stato aggiunto alle conoscenze finché non confermi.";
+    } catch (err) { this._notice = "File non caricati: " + (err?.message || "errore"); }
+    finally { this._busy = false; this.render(); }
+  }
+
   teachView() {
     const s=this.summary();
     const knowledge=s.knowledge_items || [];
@@ -700,6 +715,13 @@ class EsterPanel extends HTMLElement {
     return `
       ${this.viewHeader("TEACH / 04","INSEGNA","Raccontami liberamente come vivete la casa. Ti mostro cosa ho capito prima di ricordarlo.",String(knowledge.length),"CONOSCENZE")}
       <section class="command-deck teach-main">
+        <article class="control">
+          <h3>Aggiungi conoscenze da file</h3>
+          <p>Carica racconti della casa o descrizioni delle automazioni. Le nuove informazioni si aggiungono: quelle esistenti rimangono. I duplicati esatti vengono ignorati. Le descrizioni non vengono eseguite come automazioni.</p>
+          <input id="knowledge-files" type="file" multiple accept=".json,.txt,.md" aria-label="File di conoscenza" />
+          <button id="knowledge-files-preview" ${this._busy ? "disabled" : ""}>MOSTRA ANTEPRIMA</button>
+          <p class="hint">JSON E.S.T.E.R., TXT o Markdown. Massimo 5 file, 32 KB ciascuno. Lettura locale senza invio al provider AI; le conoscenze confermate possono poi essere usate come contesto dal provider configurato.</p>
+        </article>
         <div class="command-head"><span>VOCE / TESTO</span><b>RACCONTA A E.S.T.E.R.</b></div>
         <p>Non devi usare parole precise. Puoi parlare di più cose insieme: luci, clima, orari, persone, eccezioni e priorità.</p>
         <div class="command-input"><textarea id="teach" placeholder="Per esempio: «La sera in salotto vogliamo circa 21 gradi. Se non c'è nessuno non serve scaldarlo. Le luci esterne servono quando rientriamo col buio…»"></textarea><button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button><button id="teach-send">${this._busy?"...":"CAPIRE"}</button></div>
@@ -847,6 +869,8 @@ class EsterPanel extends HTMLElement {
     const snapshot = this.shadowRoot?.querySelector("#snapshot-create");
     if (snapshot) snapshot.onclick=()=>this.snapshot();
     const memoryExport = this.shadowRoot?.querySelector("#memory-export");
+    const knowledgeFiles = this.shadowRoot?.querySelector("#knowledge-files-preview");
+    if (knowledgeFiles) knowledgeFiles.onclick=()=>this.previewKnowledgeFiles();
     if (memoryExport) memoryExport.onclick=()=>this.exportMemory();
     const memoryImport = this.shadowRoot?.querySelector("#memory-import-send");
     if (memoryImport) memoryImport.onclick=()=>this.importMemory();
