@@ -8,6 +8,7 @@ import logging
 from zoneinfo import ZoneInfo
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers import area_registry as ar, entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, EVENT_DECISION, EVENT_QUESTION, MAX_DECISIONS
@@ -19,7 +20,7 @@ from .usage import usage_snapshot
 from .policies import evaluate
 from .quality import data_suggestions
 from .models import RiskLevel, ImpactLevel
-from .questions import merge_questions
+from .questions import merge_questions, retire_removed_questions
 from .thermal import build_room_thermal_model
 from .outcomes import evaluate_shadow_outcomes, calibration, calibrated_confidence
 from .migration import legacy_automation_inventory
@@ -50,6 +51,8 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
     async def _async_update_data(self):
         now = dt_util.utcnow()
         profiles = discover_entities(self.hass, self.storage.data["classifications"])
+        area_ids = {area.id for area in ar.async_get(self.hass).async_list_areas()}
+        entity_ids = set(er.async_get(self.hass).entities) | {p.entity_id for p in profiles}
         history = await self.history.read(profiles, now)
         events = []
         async with self.storage.lock:
@@ -199,7 +202,13 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             current_numeric = {p.entity_id: sample_value(p) for p in profiles}
             evaluate_shadow_outcomes(journal, current_numeric, now)
             data["calibration"] = calibration(data.get("feedback", []))
+            decisions_by_id = {d["decision_id"]: d for d in journal}
+            for question in data.get("questions", []):
+                if "entity_ids" not in question:
+                    question["entity_ids"] = decisions_by_id.get(question.get("decision_id"), {}).get("entity_ids", [])
             questions, new_questions = merge_questions(data.setdefault("questions", []), latest, now)
+            retire_removed_questions(questions, area_ids, entity_ids, now)
+            new_questions = [q for q in new_questions if q.get("status") == "open"]
             data["questions"] = questions
             await self.storage.async_save()
         for payload in events:
@@ -245,11 +254,11 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 "preferences": data.get("preferences", {}),
                 "history": {k: v for k, v in history.items() if k not in {"samples", "statistics"}},
                 "learning_entities": len(learning), "data_suggestions": suggestions,
-                "thermal_models": data.get("thermal_models", {}),
+                "thermal_models": {k: v for k, v in data.get("thermal_models", {}).items() if k in area_ids},
                 "calibration": data.get("calibration", {}),
-                "ventilation_models": data.get("ventilation_models", {}),
-                "hot_water_models": data.get("hot_water_models", {}),
-                "occupancy_models": data.get("occupancy_models", {}),
+                "ventilation_models": {k: v for k, v in data.get("ventilation_models", {}).items() if k in area_ids},
+                "hot_water_models": {k: v for k, v in data.get("hot_water_models", {}).items() if k in area_ids},
+                "occupancy_models": {k: v for k, v in data.get("occupancy_models", {}).items() if k in area_ids},
                 "automation_migration": legacy_automation_inventory(profiles),
                 "migration_readiness": migration,
                 "kpis": kpis,
@@ -266,6 +275,6 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 "knowledge_items": [k for k in data.get("knowledge", []) if k.get("status","active")=="active"][-200:],
                 "knowledge_coverage": knowledge_coverage,
                 "knowledge_gaps": knowledge_gaps,
-                "decision_history": journal[-100:],
+                "decision_history": [d for d in journal[-100:] if (not d.get("area_id") or d["area_id"] in area_ids) and (not d.get("entity_ids") or any(e in entity_ids for e in d["entity_ids"]))],
                 "flexible_loads": data.get("flexible_loads", []),
                 "evaluated_at": now.isoformat()}

@@ -476,6 +476,45 @@ class EsterPanel extends HTMLElement {
     }).join("");
   }
 
+  questionFileControls() {
+    const plan = this._questionImport?.items;
+    return `<article class="control"><h3>Rispondi con l'aiuto di ChatGPT</h3><p>Scarica tutte le domande, carica il file in ChatGPT e chiedi di spiegarle e raccogliere le tue risposte. Poi importa il file restituito: aggiorna solo la memoria.</p><button id="questions-export">SCARICA TUTTE LE DOMANDE</button><p><label>File di risposte <input type="file" id="questions-file" accept=".json,application/json"></label></p><button id="questions-preview">MOSTRA ANTEPRIMA</button>${plan ? `<h3>Anteprima: ${plan.length} risposte</h3>${plan.map(x=>`<details><summary>${this.esc(x.question)}</summary><p>${this.esc(x.answer || "Domanda non più pertinente")}</p><p>${this.esc(x.interpretation?.summary || "Salverò una nota nella memoria.")}</p></details>`).join("")}<p>Le domande senza risposta restano aperte. Nessun dispositivo verrà comandato.</p><button id="questions-confirm" ${plan.length ? "" : "disabled"}>CONFERMA IMPORTAZIONE</button><button id="questions-cancel">ANNULLA</button>` : ""}</article>`;
+  }
+
+  async questionFileAction(action) {
+    if (this._busy) return;
+    this._busy = true;
+    try {
+      let result;
+      if (action === "export") {
+        result = await this._hass.callWS({type:"call_service", domain:"ester", service:"export_question_file", service_data:{}, return_response:true});
+        const documentData = result?.response || result;
+        const url = URL.createObjectURL(new Blob([JSON.stringify(documentData,null,2)], {type:"application/json"}));
+        const link = document.createElement("a"); link.href=url; link.download="ester-domande.json"; link.click();
+        setTimeout(()=>URL.revokeObjectURL(url),1000);
+        this._notice = "File delle domande scaricato. Puoi caricarlo in ChatGPT.";
+      } else {
+        let content = this._questionImportContent;
+        if (action === "preview") {
+          const file = this.shadowRoot.querySelector("#questions-file")?.files?.[0];
+          this._questionImport = null; this._questionImportContent = null;
+          if (!file || file.size > 1000000) throw Error("Scegli un file JSON di massimo 1 MB.");
+          content = await file.text();
+        }
+        if (!content) throw Error("Mostra prima l'anteprima del file.");
+        result = await this._hass.callWS({type:"call_service", domain:"ester", service:"import_question_file", service_data:{file_json:content, confirm:action === "confirm"}, return_response:true});
+        if (action === "preview") {
+          this._questionImport = result?.response || result; this._questionImportContent = content;
+          this._notice = "Controlla le risposte prima di confermare. La memoria non è stata modificata.";
+        } else {
+          this._questionImport = null; this._questionImportContent = null;
+          this._notice = "Risposte importate nella memoria di E.S.T.E.R.";
+        }
+      }
+    } catch (err) { this._notice = "Operazione non completata: " + (err?.message || "errore"); }
+    finally { this._busy = false; this.render(); }
+  }
+
   groupedQuestionCards() {
     const items = this.questions();
     if (!items.length) return '<div class="empty">Nessuna domanda aperta. E.S.T.E.R. non ha bisogno di chiarimenti in questo momento.</div>';
@@ -863,6 +902,12 @@ class EsterPanel extends HTMLElement {
   }
 
   bind() {
+    for (const action of ["export", "preview", "confirm"]) {
+      const button = this.shadowRoot?.querySelector("#questions-"+action);
+      if (button) button.onclick=()=>this.questionFileAction(action);
+    }
+    const cancel = this.shadowRoot?.querySelector("#questions-cancel");
+    if (cancel) cancel.onclick=()=>{this._questionImport=null;this._questionImportContent=null;this.render();};
     this.shadowRoot?.querySelectorAll("[data-open-tab]").forEach(el => el.onclick=()=>{this._tab=el.dataset.openTab;this.render();});
     this.shadowRoot?.querySelectorAll("[data-tab]").forEach(el => {
       el.onclick = () => { this._tab = el.dataset.tab; this.render(); };
@@ -1188,7 +1233,7 @@ class EsterPanel extends HTMLElement {
       const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety"];
       body = this.viewHeader("DECISION / 02","PROPOSTE","Cosa farebbe E.S.T.E.R. e in quale stanza. Nessuna azione è stata eseguita.",this.pct(s.kpis?.avg_confidence),"FIDUCIA NEI DATI")+'<article class="control decision-explainer"><p>Mostro la proposta più recente per ogni stanza e dispositivo. Le valutazioni ripetute restano nel registro.</p><label>Mostra un argomento<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
     } else if (this._tab === "questions") {
-      body = this.viewHeader("QUESTIONS / 03","DOMANDE","Aiutami a conoscere meglio la casa, una risposta alla volta.",String(questionCount),"DA CHIARIRE")+'<article class="control"><p>Scegli una risposta proposta o scrivi con parole tue. Se non sai rispondere, scegli Non lo so: possiamo tornarci più avanti.</p></article>'+this.groupedQuestionCards();
+      body = this.viewHeader("QUESTIONS / 03","DOMANDE","Aiutami a conoscere meglio la casa, una risposta alla volta.",String(questionCount),"DA CHIARIRE")+'<article class="control"><p>Scegli una risposta proposta o scrivi con parole tue. Se non sai rispondere, scegli Non lo so: possiamo tornarci più avanti.</p></article>'+this.questionFileControls()+this.groupedQuestionCards();
     } else if (this._tab === "teach") {
       body = this.teachView();
     } else if (this._tab === "energy") {

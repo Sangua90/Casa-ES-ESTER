@@ -24,6 +24,18 @@ vm.runInNewContext(readFileSync('custom_components/ester/frontend/ester-panel.js
   display._hass = {states:{'sensor.e_s_t_e_r_summary':{attributes:{rooms:{bagno:{name:'Bagno primo piano'}}}}}};
   assert.equal(display.roomName('bagno'), 'Bagno primo piano');
   assert.equal(display.roomName(null), 'Casa / stanza non indicata');
+  const exchange = Object.create(Panel.prototype);
+  let calls = [];
+  exchange.render = () => {};
+  exchange.shadowRoot = {querySelector: () => ({files:[{size:20,text:async()=>'{"questions":[]}' }]})};
+  exchange._hass = {callWS: async request => {calls.push(request);return {response:{items:[{question:'Comfort?',answer:'21 gradi',interpretation:{summary:'Comfort: 21 °C'}}]}};}};
+  await exchange.questionFileAction('preview');
+  assert.equal(calls[0].service_data.confirm, false);
+  assert.ok(exchange.questionFileControls().includes('CONFERMA IMPORTAZIONE'));
+  await exchange.questionFileAction('confirm');
+  assert.equal(calls[1].service_data.confirm, true);
+  assert.equal(calls[1].service_data.file_json, calls[0].service_data.file_json);
+  assert.equal(exchange._questionImport, null);
   for (const id of ['teach', 'answer-test']) {
     const field = {value: 'Testo precedente'};
     const notice = {setAttribute() {}, textContent: ''};

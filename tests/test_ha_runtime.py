@@ -112,3 +112,29 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(response["real_actuation_enabled"])
         await self.hass.services.async_call("ester", "remove_context", {"event_id": store.data["context_events"][0]["event_id"]}, blocking=True)
         self.assertEqual(store.data["context_events"], [])
+        import json
+        from copy import deepcopy
+        store.data["questions"] = [{"question_id": "q1", "status": "open", "category": "climate", "area_id": "studio", "prompt": "Comfort?", "comfort_season": "winter"}]
+        exported = await self.hass.services.async_call("ester", "export_question_file", {}, blocking=True, return_response=True)
+        exported["questions"][0]["answer"] = "21 gradi"
+        before = deepcopy(store.data)
+        preview = await self.hass.services.async_call("ester", "import_question_file", {"file_json": json.dumps(exported)}, blocking=True, return_response=True)
+        self.assertFalse(preview["confirmed"])
+        self.assertEqual(store.data, before)
+        await self.hass.services.async_call("ester", "import_question_file", {"file_json": json.dumps(exported), "confirm": True}, blocking=True, return_response=True)
+        self.assertEqual(store.data["preferences"]["seasonal_comfort:winter:studio"], 21)
+        with self.assertRaises(ServiceValidationError):
+            await self.hass.services.async_call("ester", "import_question_file", {"file_json": json.dumps(exported), "confirm": True}, blocking=True, return_response=True)
+
+    async def test_removed_area_override_does_not_create_ghost_room(self):
+        from homeassistant.helpers import area_registry
+        from custom_components.ester.discovery import discover_entities
+        reg = area_registry.async_get(self.hass)
+        area = reg.async_create("Camera SABO")
+        self.hass.states.async_set("sensor.old_temperature", "unavailable", {"device_class": "temperature"})
+        overrides = {"sensor.old_temperature": {"area_id": area.id}}
+        self.assertEqual(discover_entities(self.hass, overrides)[0].area_id, area.id)
+        reg.async_delete(area.id)
+        profiles = discover_entities(self.hass, overrides)
+        self.assertIsNone(profiles[0].area_id)
+        self.assertEqual(profiles[0].state, "unavailable")
