@@ -1,3 +1,18 @@
+## E.S.T.E.R. 1.4.9 — Raccolta file e salvataggio visibile
+
+- CARICA conserva subito i documenti in Home Assistant; il 100% appare solo dopo la conferma del backend.
+- Raccolta persistente con numero, nomi, dimensioni, data e stato di ciascun file.
+- Anteprime da confermare recuperabili anche dopo riapertura della pagina.
+- AGGIUNGI ALTRI FILE consente caricamenti successivi senza perdere la raccolta.
+- Duplicati identificati dal contenuto; nomi alternativi conservati, file omonimi distinti.
+- Testo non inviato e posizione del menu conservati durante aggiornamenti della raccolta.
+- Nessuna attuazione: le conoscenze diventano attive solo dopo CONFERMA E RICORDA.
+
+Verifiche: upload HTTP autenticato, salvataggio prima della conferma, riapertura
+del pannello e recupero anteprima in WebKit con profilo iPhone 13, errori e retry.
+Nessuna verifica sull'impianto domestico o su iPhone fisico.
+Aggiorna da HACS, riavvia Home Assistant e ricarica E.S.T.E.R.
+
 ## E.S.T.E.R. 1.4.8 — Caricamento reale in INSEGNA
 
 - Selezione di uno o più file, elenco visibile e pulsante CARICA.

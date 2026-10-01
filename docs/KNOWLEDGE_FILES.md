@@ -8,9 +8,15 @@ Non usare **Importa memoria**, che serve a ripristinare un backup.
 
 I file vengono inviati al backend Home Assistant tramite upload autenticato,
 riservato agli amministratori. Il caricamento conserva i documenti nella proposta
-persistente; la conferma archivia gli originali utili nella memoria locale
+persistente e salva subito tutti gli originali nella memoria locale
 `knowledge_documents`, identificati dall'impronta del contenuto, senza usare il
 nome come percorso su disco. Le proposte in attesa sono limitate alle ultime 20.
+La raccolta conserva fino a 1000 contenuti distinti e mostra nomi, dimensioni,
+data, conoscenze collegate e stato. Un file salvato non è ancora conoscenza attiva:
+premi VEDI ANTEPRIMA E CONFERMA anche dopo aver riaperto la pagina.
+I file restano nella raccolta se scarti l'anteprima; per riproporre un'anteprima
+scartata o non più nelle ultime 20, carica nuovamente il file.
+AGGIUNGI ALTRI FILE permette di selezionare il gruppo successivo.
 Gli originali sono conservati nello storage locale, mentre l'esportazione portabile
 della memoria contiene le conoscenze estratte con la loro fonte.
 Il caricamento non invia documenti al provider AI. Le informazioni confermate entrano nella conoscenza

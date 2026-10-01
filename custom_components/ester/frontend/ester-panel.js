@@ -12,6 +12,9 @@ class EsterPanel extends HTMLElement {
     this._knowledgeFiles = [];
     this._uploadProgress = 0;
     this._uploadStatus = "";
+    this._fileCollection = null;
+    this._collectionError = "";
+    this._loadingCollection = false;
     this._neuralFrame = 0;
     this._neuralResize = null;
     this._neuralStartedAt = 0;
@@ -27,6 +30,7 @@ class EsterPanel extends HTMLElement {
   refreshDataOnly() {
     // Preserve scroll position and unsent answers during background updates.
     if (this._tab === "overview") this.startNeuralCore();
+    if (this._tab === "teach" && !this._fileCollection && !this._loadingCollection && !this._collectionError) this.loadFileCollection();
   }
   disconnectedCallback() { this._recognition?.abort(); this.stopNeuralCore(); }
 
@@ -160,6 +164,7 @@ class EsterPanel extends HTMLElement {
       this._teachDraft = null;
       this._notice = response?.summary || "Conoscenze salvate.";
       if (this._uploadProgress === 100) this.updateUploadStatus(this._notice);
+      await this.loadFileCollection();
       try { await this._hass.callService("ester","evaluate",{}); }
       catch (_) { this._notice += " La schermata si aggiornerà alla prossima valutazione."; }
     } catch (err) {
@@ -169,11 +174,13 @@ class EsterPanel extends HTMLElement {
 
   async discardTeach() {
     if (this._busy) return;
+    const isFile = this._teachDraft?.source === "knowledge_files";
     const token = this._teachDraft?.proposal_id;
     if (token && this._hass) {
       try { await this._hass.callService("ester","discard_teaching",{proposal_id:token}); } catch (_) {}
     }
-    this._teachDraft=null; this._notice="Proposta scartata. Non ho modificato la memoria."; this.render();
+    this._teachDraft=null; this._notice=isFile ? "Proposta scartata. Il file resta nella raccolta; non ho aggiunto conoscenze." : "Proposta scartata. Non ho modificato la memoria.";
+    await this.loadFileCollection(); this.render();
   }
 
   async answer(questionId, quickAnswer=null) {
@@ -755,6 +762,36 @@ class EsterPanel extends HTMLElement {
     this.render();
   }
 
+  async loadFileCollection() {
+    if (this._loadingCollection || !this._hass) return;
+    this._loadingCollection = true;
+    this._collectionError = "";
+    try {
+      const auth = this._hass.auth;
+      if (!auth) throw Error("Sessione non disponibile.");
+      if (auth.expired) await auth.refreshAccessToken();
+      const response = await fetch(this._hass.hassUrl("/api/ester/knowledge/upload"), {
+        headers:{Authorization:`Bearer ${auth.accessToken}`}, signal:AbortSignal.timeout(15000)
+      });
+      const collection = await response.json();
+      if (!response.ok) throw Error(collection.error || `Errore ${response.status}`);
+      this._fileCollection = collection;
+    } catch (error) { this._collectionError = "Raccolta non disponibile: " + (error.message || "errore di connessione"); }
+    finally { this._loadingCollection = false; if (this._tab === "teach") this.render(); }
+  }
+
+  fileCollectionView() {
+    const collection = this._fileCollection;
+    const labels = {confirmed:"FILE CONSERVATO · CONOSCENZE CONFERMATE",pending:"FILE CONSERVATO · CONOSCENZE DA CONFERMARE",stored:"FILE CONSERVATO · NESSUNA NUOVA CONOSCENZA COLLEGATA"};
+    return `<article class="control" id="knowledge-collection"><h3>Raccolta file conservati in memoria · ${collection ? collection.count : "…"}</h3>
+      <p>I file sono salvati in Home Assistant. Le conoscenze diventano attive dopo la conferma.</p>
+      ${this._collectionError ? `<p role="alert">${this.esc(this._collectionError)}</p>` : ""}
+      <button id="knowledge-collection-refresh" ${this._loadingCollection ? "disabled" : ""}>${this._loadingCollection ? "VERIFICA…" : "AGGIORNA RACCOLTA"}</button>
+      ${(collection?.files || []).map(file=>`<div class="knowledge-row"><b>${this.esc(file.name)}</b><span>${labels[file.status] || "SALVATO"}</span><small>${file.size} byte · ${this.esc(new Date(file.uploaded_at).toLocaleString("it-IT"))} · ${file.knowledge_count} conoscenze collegate</small>${file.names?.length > 1 ? `<small>Nomi usati: ${file.names.map(n=>this.esc(n)).join(", ")}</small>` : ""}</div>`).join("") || `<p>${collection ? "Nessun file salvato." : "Verifica dei file salvati in corso…"}</p>`}
+      ${(collection?.pending || []).map(proposal=>`<div class="knowledge-row"><span>${this.esc(proposal.summary)}</span><button data-file-proposal="${this.esc(proposal.proposal_id)}">VEDI ANTEPRIMA E CONFERMA</button></div>`).join("")}
+      <p class="hint">Il conteggio distingue i contenuti, non i nomi: ricaricare lo stesso file non crea un'altra copia.</p></article>`;
+  }
+
   updateUploadStatus(message, progress = this._uploadProgress) {
     this._uploadStatus = message;
     this._uploadProgress = progress;
@@ -781,14 +818,14 @@ class EsterPanel extends HTMLElement {
       selected.forEach(file => body.append("files", file, file.name));
       const result = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open("POST", this._hass.hassUrl("api/ester/knowledge/upload"));
+        xhr.open("POST", this._hass.hassUrl("/api/ester/knowledge/upload"));
         xhr.setRequestHeader("Authorization", `Bearer ${auth.accessToken}`);
         xhr.responseType = "json";
         xhr.timeout = 60000;
         xhr.upload.onprogress = event => {
           if (event.lengthComputable) {
             const progress = Math.round(event.loaded / event.total * 100);
-            this.updateUploadStatus(progress < 100 ? `Caricamento ${progress}%` : "File inviati. Validazione in Home Assistant…", progress);
+            this.updateUploadStatus(progress < 100 ? `Trasferimento ${progress}%` : "Trasferimento terminato. Attendo conferma del salvataggio da Home Assistant…", Math.min(95, progress));
           }
         };
         xhr.onload = () => {
@@ -801,12 +838,15 @@ class EsterPanel extends HTMLElement {
         xhr.send(body);
       });
       this._teachDraft = result.proposal;
+      this._fileCollection = result.collection;
+      this._collectionError = "";
       this._knowledgeFiles = [];
-      this.updateUploadStatus(`${result.uploaded_files.length} file caricati e verificati. Controlla l'anteprima e conferma per ricordarli.`, 100);
+      this.updateUploadStatus(`${result.uploaded_files.length} file salvati e conservati nella memoria di Home Assistant. Li trovi nella raccolta. Conferma l'anteprima per aggiungere le conoscenze.`, 100);
       this._notice = this._uploadStatus;
     } catch (err) {
-      this.updateUploadStatus("File non caricati: " + (err?.message || "errore"), 0);
+      this.updateUploadStatus("Caricamento non confermato: " + (err?.message || "errore"), 0);
       this._notice = this._uploadStatus;
+      await this.loadFileCollection();
     }
     finally { this._busy = false; this.render(); }
   }
@@ -830,15 +870,17 @@ class EsterPanel extends HTMLElement {
           <input id="knowledge-files" type="file" multiple accept=".json,.txt,.md" aria-label="Aggiungi uno o più file di conoscenza" ${this._busy ? "disabled" : ""} />
           <ul class="upload-files">${(this._knowledgeFiles || []).map(f=>`<li>${this.esc(f.name)} · ${f.size} byte</li>`).join("")}</ul>
           <button id="knowledge-files-upload" ${this._busy || !this._knowledgeFiles?.length ? "disabled" : ""}>${this._busy ? "CARICAMENTO…" : "CARICA"}</button>
+          ${this._fileCollection?.count ? `<button id="knowledge-files-add-more" ${this._busy ? "disabled" : ""}>AGGIUNGI ALTRI FILE</button>` : ""}
           <progress id="knowledge-upload-progress" max="100" value="${this._uploadProgress || 0}" aria-label="Progresso caricamento"></progress>
           <p id="knowledge-upload-status" role="status" aria-live="polite">${this.esc(this._uploadStatus || "Nessun file selezionato.")}</p>
           <p class="hint">JSON E.S.T.E.R., TXT o Markdown. Massimo 5 file, 32 KB ciascuno. Lettura locale senza invio al provider AI; le conoscenze confermate possono poi essere usate come contesto dal provider configurato.</p>
         </article>
+        ${this.fileCollectionView()}
         <div class="command-head"><span>VOCE / TESTO</span><b>RACCONTA A E.S.T.E.R.</b></div>
         <p>Non devi usare parole precise. Puoi parlare di più cose insieme: luci, clima, orari, persone, eccezioni e priorità.</p>
         <div class="command-input"><textarea id="teach" placeholder="Per esempio: «La sera in salotto vogliamo circa 21 gradi. Se non c'è nessuno non serve scaldarlo. Le luci esterne servono quando rientriamo col buio…»"></textarea><button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button><button id="teach-send">${this._busy?"...":"CAPIRE"}</button></div>
       </section>
-      ${proposal ? `<h2 class="section-title">QUELLO CHE HO CAPITO</h2><article class="control teach-review"><p>${this.esc(proposal.summary||"Controlla questi punti.")}</p><div class="knowledge-list">${(proposal.items||[]).map(x=>`<div class="knowledge-row"><b>${this.esc(labels[x.domain]||this.categoryLabel(x.domain))}</b><span>${this.esc(x.statement)}</span><small>${this.esc((x.kind||"informazione").replaceAll("_"," "))} · ${this.pct(x.confidence)}</small></div>`).join("")||'<div class="empty">Non ho estratto informazioni affidabili.</div>'}</div><div class="button-row"><button id="teach-confirm">CONFERMA E RICORDA</button><button id="teach-discard">SCARTA</button></div><p class="hint">Finché non confermi, la memoria di E.S.T.E.R. non cambia.</p></article>` : ""}
+      ${proposal ? `<h2 class="section-title">QUELLO CHE HO CAPITO</h2><article class="control teach-review"><p>${this.esc(proposal.summary||"Controlla questi punti.")}</p><div class="knowledge-list">${(proposal.items||[]).map(x=>`<div class="knowledge-row"><b>${this.esc(labels[x.domain]||this.categoryLabel(x.domain))}</b><span>${this.esc(x.statement)}</span><small>${this.esc((x.kind||"informazione").replaceAll("_"," "))} · ${this.pct(x.confidence)}</small></div>`).join("")||'<div class="empty">Non ho estratto informazioni affidabili.</div>'}</div><div class="button-row"><button id="teach-confirm">CONFERMA E RICORDA</button><button id="teach-discard">SCARTA</button></div><p class="hint">Finché non confermi, queste informazioni non diventano conoscenze attive. I file caricati restano conservati nella raccolta.</p></article>` : ""}
       <h2 class="section-title">COSA MI HAI INSEGNATO</h2>
       ${knowledge.length ? `<section class="grid">${domains.filter(d=>grouped[d]?.length).map(d=>{const items=grouped[d];const cv=coverage[d]||{};return `<article class="control knowledge-domain"><div class="eyebrow">${labels[d]}</div><h3>${items.length} informazioni</h3><p>${this.esc(cv.meaning|| "Ecco le informazioni conservate.")}</p>${items.slice(-5).map(x=>`<div class="knowledge-mini">${this.esc(x.statement||x.text||"")}</div>`).join("")}</article>`}).join("")}</section>` : '<article class="control"><h3>Cominciamo con una cosa semplice</h3><p>Raccontami come usate una stanza, oppure carica un file. Ti mostrerò quello che ho capito prima di salvarlo.</p></article>'}
       <h2 class="section-title">COSA MI MANCA</h2>
@@ -997,6 +1039,15 @@ class EsterPanel extends HTMLElement {
     if (knowledgeFiles) knowledgeFiles.onclick=()=>this.uploadKnowledgeFiles();
     const knowledgeInput = this.shadowRoot?.querySelector("#knowledge-files");
     if (knowledgeInput) knowledgeInput.onchange=()=>this.selectKnowledgeFiles(knowledgeInput.files);
+    const addMoreFiles = this.shadowRoot?.querySelector("#knowledge-files-add-more");
+    if (addMoreFiles) addMoreFiles.onclick=()=>knowledgeInput?.click();
+    const collectionRefresh = this.shadowRoot?.querySelector("#knowledge-collection-refresh");
+    if (collectionRefresh) collectionRefresh.onclick=()=>this.loadFileCollection();
+    this.shadowRoot?.querySelectorAll("[data-file-proposal]").forEach(button=>button.onclick=()=>{
+      if (this._busy) return;
+      this._teachDraft = this._fileCollection?.pending?.find(p=>p.proposal_id===button.dataset.fileProposal);
+      this.render(); this.shadowRoot?.querySelector(".teach-review")?.scrollIntoView({behavior:"smooth",block:"start"});
+    });
     if (memoryExport) memoryExport.onclick=()=>this.exportMemory();
     const memoryImport = this.shadowRoot?.querySelector("#memory-import-send");
     if (memoryImport) memoryImport.onclick=()=>this.importMemory();
@@ -1221,6 +1272,8 @@ class EsterPanel extends HTMLElement {
 
   render() {
     if (!this.shadowRoot) return;
+    const draftText = this.shadowRoot.querySelector("#teach")?.value;
+    const navScroll = this.shadowRoot.querySelector("nav")?.scrollLeft || 0;
     this.stopNeuralCore();
     const s = this.summary();
     const status = this.state("sensor.e_s_t_e_r_status")?.state || "loading";
@@ -1434,6 +1487,11 @@ class EsterPanel extends HTMLElement {
       </div>
     `;
     this.bind();
+    const teachField = this.shadowRoot.querySelector("#teach");
+    if (teachField && draftText !== undefined) teachField.value = draftText;
+    const nav = this.shadowRoot.querySelector("nav");
+    if (nav) nav.scrollLeft = navScroll;
+    if (this._tab === "teach" && this._hass && !this._fileCollection && !this._loadingCollection && !this._collectionError) this.loadFileCollection();
     if (this._tab === "overview") requestAnimationFrame(()=>this.startNeuralCore());
   }
 }

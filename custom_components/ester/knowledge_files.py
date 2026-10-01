@@ -4,10 +4,35 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from copy import deepcopy
 from datetime import datetime, UTC
 from uuid import uuid4
 
 from .language import KNOWLEDGE_DOMAINS, KNOWLEDGE_KINDS
+
+
+def document_collection(store: dict) -> dict:
+    """Expose receipts and recoverable proposals, never raw document contents."""
+    documents = {d["digest"]: d for d in store.get("knowledge_documents", [])}
+    proposals = []
+    pending_digests = set()
+    for proposal in store.get("pending_teachings", []):
+        if proposal.get("source") != "knowledge_files":
+            continue
+        proposals.append({k: v for k, v in proposal.items() if k != "documents"})
+        for document in proposal.get("documents", []):
+            digest = hashlib.sha256(document["content"].encode("utf-8")).hexdigest()
+            pending_digests.add(digest)
+            documents.setdefault(digest, {**document, "digest": digest, "uploaded_at": proposal["created_at"]})
+    files = []
+    for digest, document in documents.items():
+        count = sum(k.get("source_digest") == digest for k in store.get("knowledge", []))
+        files.append({"digest": digest, "name": document["name"],
+                      "names": document.get("names", [document["name"]]),
+                      "size": len(document["content"].encode("utf-8")),
+                      "uploaded_at": document["uploaded_at"], "knowledge_count": count,
+                      "status": "confirmed" if count else "pending" if digest in pending_digests else "stored"})
+    return {"files": files, "count": len(files), "pending": proposals}
 
 
 async def prepare_documents(coordinator, documents: list) -> dict:
@@ -20,13 +45,26 @@ async def prepare_documents(coordinator, documents: list) -> dict:
                     "documents": documents,
                     "summary": f"{len(new)} nuove informazioni da aggiungere; {len(items)-len(new)} duplicati ignorati. Nessuna sostituzione."}
         pending = coordinator.storage.data.setdefault("pending_teachings", [])
-        previous = list(pending)
+        previous = deepcopy(coordinator.storage.data)
         pending.append(proposal)
         del pending[:-20]
+        archive = coordinator.storage.data.setdefault("knowledge_documents", [])
+        known = {d["digest"]: d for d in archive}
+        for document in documents:
+            digest = hashlib.sha256(document["content"].encode("utf-8")).hexdigest()
+            if digest not in known:
+                record = {**document, "digest": digest, "uploaded_at": proposal["created_at"], "names": [document["name"]]}
+                archive.append(record)
+                known[digest] = record
+            elif document["name"] not in known[digest].get("names", [known[digest]["name"]]):
+                known[digest].setdefault("names", [known[digest]["name"]]).append(document["name"])
         try:
+            if len(archive) > 1000:
+                raise ValueError("Raccolta piena: massimo 1000 file distinti.")
             await coordinator.storage.async_save()
         except Exception:
-            coordinator.storage.data["pending_teachings"] = previous
+            coordinator.storage.data.clear()
+            coordinator.storage.data.update(previous)
             raise
     return {k: v for k, v in {**proposal, "memory_changed": False, "device_action": False}.items() if k != "documents"}
 

@@ -77,9 +77,15 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
             proposal = (await response.json())["proposal"]
             self.assertFalse(proposal["device_action"])
             self.assertEqual(self.store.data["knowledge"], [])
+            collection_response = await self.client.get('/api/ester/knowledge/upload', headers={'Authorization': f'Bearer {self.token}'})
+            collection = await collection_response.json()
+            self.assertEqual(collection['count'], 2)
+            self.assertTrue(all(f['status'] == 'pending' for f in collection['files']))
+            self.assertNotIn('content', json.dumps(collection))
             restored = EsterStorage(self.hass)
             await restored.async_load()
             self.assertEqual(len(restored.data["pending_teachings"][-1]["documents"]), 2)
+            self.assertEqual(len(restored.data['knowledge_documents']), 2)
             self.assertEqual((await self.confirm(proposal))["saved"], 2)
             self.assertEqual(len(self.store.data["knowledge_documents"]), 2)
             for files in (batch, [("rinominato.txt", b"Prima informazione")]):
@@ -90,6 +96,10 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
             await restored.async_load()
             self.assertEqual(len(restored.data["knowledge"]), 3)
             self.assertEqual(len(restored.data["knowledge_documents"]), 3)
+            collection = await (await self.client.get('/api/ester/knowledge/upload', headers={'Authorization': f'Bearer {self.token}'})).json()
+            self.assertEqual(collection['count'], 3)
+            self.assertTrue(all(f['status'] == 'confirmed' for f in collection['files']))
+            self.assertIn('rinominato.txt', collection['files'][0]['names'])
 
     async def test_rejections_are_atomic_and_admin_only(self):
         from copy import deepcopy
@@ -107,6 +117,8 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
         refresh = await self.hass.auth.async_create_refresh_token(self.member, client_id="http://localhost/")
         token = self.hass.auth.async_create_access_token(refresh)
         response = await self.upload([('a.txt', b'Valid')], token=token)
+        self.assertEqual(response.status, 403)
+        response = await self.client.get('/api/ester/knowledge/upload', headers={'Authorization': f'Bearer {token}'})
         self.assertEqual(response.status, 403)
         with patch.object(self.store, 'async_save', side_effect=OSError('Disk full')):
             response = await self.upload([('a.txt', b'Valid')])
@@ -150,31 +162,46 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
               const panel = document.querySelector('ester-panel');
               panel._tab = 'teach';
               panel.hass = {states:{}, auth:{accessToken:token,expired:false},
-                hassUrl:path=>new URL('/'+path,location.origin).href,
+                hassUrl:path=>new URL(path,location.origin).href,
                 callWS:async data=>(await fetch('/test-service',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})).json(),
                 callService:async()=>{}};
               panel.render();
             }''', self.token)
+            await page.wait_for_function("document.querySelector('ester-panel')._fileCollection !== null")
+            await page.locator('#teach').fill('Nota ancora da inviare')
             await page.locator('#knowledge-files').set_input_files([
                 {'name':'casa.txt','mimeType':'text/plain','buffer':b'Prima informazione'},
                 {'name':'casa.txt','mimeType':'text/plain','buffer':b'Seconda informazione'}])
             self.assertEqual(await page.locator('.upload-files li').count(), 2)
+            self.assertEqual(await page.locator('#teach').input_value(), 'Nota ancora da inviare')
             await page.locator('#knowledge-files-upload').click()
             await page.locator('#teach-confirm').wait_for()
-            self.assertIn('2 file caricati', await page.locator('#knowledge-upload-status').inner_text())
+            self.assertIn('2 file salvati e conservati', await page.locator('#knowledge-upload-status').inner_text())
+            self.assertIn('Raccolta file conservati in memoria · 2', await page.locator('#knowledge-collection').inner_text())
+            self.assertFalse(await page.locator('#knowledge-files-add-more').is_disabled())
             self.assertEqual(self.store.data['knowledge'], [])
             self.assertEqual(await page.locator('#knowledge-upload-progress').evaluate('(el)=>el.value'), 100)
             self.assertTrue(await page.locator('#knowledge-files-upload').is_disabled())
             self.assertTrue(await page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
             if os.environ.get('ESTER_SCREENSHOT'):
                 await page.screenshot(path=os.environ['ESTER_SCREENSHOT'], full_page=True)
+            # A new panel recovers uploaded files and pending proposals from real HA storage.
+            await page.evaluate('''() => {
+              const old = document.querySelector('ester-panel');
+              const hass = old._hass;
+              const panel = document.createElement('ester-panel'); old.replaceWith(panel);
+              panel._tab = 'teach'; panel.hass = hass; panel.render();
+            }''')
+            await page.locator('[data-file-proposal]').wait_for()
+            self.assertIn('Raccolta file conservati in memoria · 2', await page.locator('#knowledge-collection').inner_text())
+            await page.locator('[data-file-proposal]').click()
             await page.locator('#teach-confirm').click()
             await page.wait_for_function("document.querySelector('ester-panel')._teachDraft === null")
             self.assertEqual(len(self.store.data['knowledge']), 2)
             await page.locator('#knowledge-files').set_input_files([
                 {'name':'bad.json','mimeType':'application/json','buffer':b'{}'}])
             await page.locator('#knowledge-files-upload').click()
-            await page.wait_for_function("document.querySelector('ester-panel')._uploadStatus.includes('File non caricati')")
+            await page.wait_for_function("document.querySelector('ester-panel')._uploadStatus.includes('Caricamento non confermato')")
             self.assertEqual(await page.locator('.upload-files li').count(), 1)
             self.assertFalse(await page.locator('#knowledge-files-upload').is_disabled())
             self.assertEqual(len(self.store.data['knowledge']), 2)
