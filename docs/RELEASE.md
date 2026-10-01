@@ -1,3 +1,17 @@
+## E.S.T.E.R. 1.4.7 — Domande e risposte da file
+
+- Esporta tutte le domande aperte in un JSON da spiegare e compilare con ChatGPT.
+- Importa le risposte con anteprima e conferma; checkpoint prima dell'apprendimento.
+- Lascia aperte le risposte vuote, rinvia «Non lo so», chiude le domande obsolete.
+- Rifiuta interamente file con risposte cambiate, già chiuse, sconosciute o duplicate.
+- Archivia domande su aree eliminate e nasconde le relative proposte e modelli correnti.
+- Non confonde sensori offline con sensori eliminati.
+- «Dati non affidabili» è una diagnosi tecnica, non una domanda a cui rispondere.
+- Shadow Mode permanente: nessuna attuazione e nessun invio a Gemini durante l'importazione.
+
+Guida: docs/QUESTION_FILES.md. Aggiorna da HACS, riavvia Home Assistant e ricarica
+la pagina E.S.T.E.R. La pulizia avviene alla successiva valutazione.
+
 ## E.S.T.E.R. 1.4.6 — Aggiornamento domande salvate
 
 Le domande aperte ricevono le spiegazioni aggiornate anche quando la proposta

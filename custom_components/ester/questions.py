@@ -110,6 +110,8 @@ def _friendly_question(decision: dict, prompt: str) -> dict:
     return base
 
 def question_from_decision(decision: dict, now: datetime) -> dict | None:
+    if decision.get("category") == "operational_safety" and decision.get("title") == "Dati non affidabili":
+        return None  # Sensor health is a diagnostic, not a user preference.
     prompt = (decision.get("evidence") or {}).get("question")
     if not prompt:
         return None
@@ -119,6 +121,7 @@ def question_from_decision(decision: dict, now: datetime) -> dict | None:
         "decision_id": decision["decision_id"],
         "category": decision["category"],
         "area_id": decision.get("area_id"),
+        "entity_ids": decision.get("entity_ids", []),
         "title": decision["title"],
         "prompt": prompt,
         "reasoning": decision["reasoning"],
@@ -144,6 +147,8 @@ def merge_questions(existing: list[dict], decisions: list[dict], now: datetime) 
     created = []
     latest = {}
     for question in existing:
+        if question.get("status") == "open" and question.get("category") == "operational_safety" and question.get("title") == "Dati non affidabili":
+            question.update(status="technical_check", updated_at=now.isoformat())
         if question.get("status") == "open":
             # Refresh presentation even when the originating proposal has changed.
             evidence = {"comfort_season": question.get("comfort_season"), "season_source": question.get("season_source", "calendar")}
@@ -174,6 +179,8 @@ def merge_questions(existing: list[dict], decisions: list[dict], now: datetime) 
         previous = latest.get(key)
         if previous:
             stamp, question = previous
+            if question.get("status") in {"obsolete", "removed_reference"}:
+                continue
             if question.get("status") == "open":
                 question["updated_at"] = now.isoformat()
                 question["confidence"] = item["confidence"]
@@ -190,6 +197,18 @@ def merge_questions(existing: list[dict], decisions: list[dict], now: datetime) 
         created.append(item)
         latest[key] = (now, item)
     return existing[-300:], created
+
+
+def retire_removed_questions(questions, area_ids, entity_ids, now):
+    """Archive deleted references, keeping unavailable but registered sensors."""
+    for q in questions:
+        if q.get("status") != "open":
+            continue
+        missing_area = bool(q.get("area_id") and q["area_id"] not in area_ids)
+        refs = q.get("entity_ids") or []
+        missing_entities = bool(refs and all(e not in entity_ids for e in refs))
+        if missing_area or missing_entities:
+            q.update(status="removed_reference", updated_at=now.isoformat())
 
 
 def _temperature(text: str) -> float | None:

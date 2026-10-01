@@ -53,7 +53,11 @@ def discover_entities(hass: HomeAssistant, classifications=None) -> list[EntityP
         unit = state.attributes.get("unit_of_measurement")
         device_class = state.attributes.get("device_class")
         override = (classifications or {}).get(entity_id, {})
-        area_id = override.get("area_id", area_id)
+        override_area = override.get("area_id")
+        if override_area and area_reg.async_get_area(override_area):
+            area_id = override_area
+        if area_id and not area_reg.async_get_area(area_id):
+            area_id = None
         if domain in {"climate", "water_heater"}:
             unit = unit or hass.config.units.temperature_unit
 

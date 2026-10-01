@@ -398,3 +398,22 @@ preview_knowledge_files:
       selector:
         text:
           multiline: true
+
+export_question_file:
+  name: "Scarica tutte le domande"
+  description: "Esporta le domande aperte con contesto e campi per le risposte."
+import_question_file:
+  name: "Importa risposte da file"
+  description: "Valida tutte le risposte; aggiorna solo la memoria dopo conferma."
+  fields:
+    file_json:
+      required: true
+      name: "File JSON domande e risposte"
+      selector:
+        text:
+          multiline: true
+    confirm:
+      name: "Conferma importazione"
+      default: false
+      selector:
+        boolean: {}

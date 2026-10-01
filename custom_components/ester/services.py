@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from copy import deepcopy
 import json
 from zoneinfo import ZoneInfo
 from time import monotonic
@@ -20,6 +21,7 @@ from .const import DOMAIN, EVENT_FEEDBACK
 from .home import MODES, ROLES
 from .usage import validate_profile
 from .questions import apply_answer
+from .question_files import export_questions, preview_answers, import_answers
 from .language_pipeline import interpret_and_store
 from .language import store_teaching_items
 from .knowledge_files import parse_documents, additions, append_documents
@@ -210,6 +212,28 @@ def register_services(hass):
             await coordinator.storage.async_save()
         await coordinator.async_request_refresh()
         return {"question_id": question_id, "status": "deferred" if interpretation["kind"] == "deferred" else "answered", "interpretation": interpretation}
+
+    async def export_question_file(call):
+        coordinator = runtime()
+        async with coordinator.storage.lock:
+            return export_questions(coordinator.storage.data, (coordinator.data or {}).get("rooms", {}), dt_util.utcnow())
+
+    async def import_question_file(call):
+        coordinator = runtime()
+        try:
+            document = json.loads(call.data["file_json"])
+            async with coordinator.storage.lock:
+                plan = preview_answers(coordinator.storage.data, document)
+                if call.data.get("confirm", False) and plan:
+                    snapshot = checkpoint(coordinator, "Prima di importare risposte", "question_file")
+                    snapshot["memory"]["questions"] = deepcopy(coordinator.storage.data.get("questions", []))
+                    import_answers(coordinator.storage.data, document, dt_util.utcnow())
+                    await coordinator.storage.async_save()
+        except (ValueError, TypeError) as err:
+            raise ServiceValidationError(str(err)) from None
+        if call.data.get("confirm", False):
+            await coordinator.async_request_refresh()
+        return {"items": plan, "confirmed": call.data.get("confirm", False)}
 
     async def select_voice_question(call):
         coordinator = runtime()
@@ -500,6 +524,8 @@ def register_services(hass):
         }),
         "remove_usage_profile": (remove_usage_profile, {vol.Required("profile_id"): SHORT}),
         "answer_question": (answer_question, {vol.Required("question_id"): SHORT, vol.Required("answer"): TEXT}),
+        "export_question_file": (export_question_file, {}),
+        "import_question_file": (import_question_file, {vol.Required("file_json"): vol.All(cv.string, vol.Length(min=2, max=1000000)), vol.Optional("confirm", default=False): cv.boolean}),
         "select_voice_question": (select_voice_question, {vol.Required("question_id"): SHORT}),
         "dismiss_question": (dismiss_question, {vol.Required("question_id"): SHORT}),
         "interpret_message": (interpret_message, {vol.Required("message"): TEACH_TEXT, vol.Optional("preview", default=True): cv.boolean}),
@@ -551,4 +577,4 @@ def register_services(hass):
     }
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
-            supports_response=SupportsResponse.ONLY if name in {"get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "preview_knowledge_files", "confirm_teaching", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)
+            supports_response=SupportsResponse.ONLY if name in {"export_question_file", "import_question_file", "get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "preview_knowledge_files", "confirm_teaching", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)
