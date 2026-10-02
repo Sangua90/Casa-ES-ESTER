@@ -95,6 +95,10 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
             await async_pre_backup(fake_hass)
         flush.assert_awaited()
         self.assertEqual(len(store._backup["copies"]), 2)
+        store.data["preferences"]["new"] = "must persist"
+        with patch.object(store._store, "async_save", new_callable=AsyncMock):
+            with self.assertRaises(OSError):
+                await store.async_save()
 
     async def test_recorder_adapter_and_statistics_signature(self):
         from homeassistant.core import State

@@ -9,8 +9,9 @@ from datetime import datetime, UTC
 import hashlib
 import json
 import logging
+from pathlib import Path
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, CoreState
 from homeassistant.helpers.storage import Store
 
 from .const import MAX_DECISIONS, STORAGE_KEY, STORAGE_VERSION
@@ -24,13 +25,25 @@ def memory_digest(data):
     return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()).hexdigest()
 
 
+def verify_saved(path, expected):
+    """Read the actual disk file, not HA's in-memory pending-write cache."""
+    envelope = json.loads(Path(path).read_text(encoding="utf-8"))
+    if memory_digest(envelope.get("data")) != memory_digest(expected):
+        raise OSError("Il contenuto riletto dal disco non corrisponde al salvataggio.")
+
+
+def memory_files_exist(paths):
+    return any(Path(path).exists() or any(Path(path).parent.glob(Path(path).name + ".corrupt.*")) for path in paths)
+
+
 class EsterStorage:
     """Small persistent store for learned context and shadow decisions."""
 
     def __init__(self, hass: HomeAssistant) -> None:
         self.lock = Lock()
-        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
-        self._backup_store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, "ester.memory_backup")
+        self._hass = hass
+        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY, atomic_writes=True, serialize_in_event_loop=False)
+        self._backup_store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, "ester.memory_backup", atomic_writes=True, serialize_in_event_loop=False)
         self._backup: dict = {}
         self.backup_status: dict = {"status": "not_created", "home_assistant_backup_includes_memory": True}
         self.data: dict[str, Any] = {
@@ -65,6 +78,7 @@ class EsterStorage:
         }
 
     async def async_load(self) -> None:
+        had_files = await self._hass.async_add_executor_job(memory_files_exist, [self._store.path, self._backup_store.path])
         error = None
         try:
             saved = await self._store.async_load()
@@ -89,6 +103,8 @@ class EsterStorage:
                 raise error
             if self._backup.get("copies") and not saved:
                 raise ValueError("Memoria principale assente e copie non verificabili: ripristina un backup Home Assistant. Nessuna memoria vuota verrà salvata.")
+            if had_files and not saved:
+                raise ValueError("File della memoria presenti ma illeggibili: ripristina un backup senza inizializzare una memoria vuota.")
         if saved:
             self.data.update(saved)
         if self._backup.get("copies"):
@@ -102,11 +118,15 @@ class EsterStorage:
         record = {"created_at": datetime.now(UTC).isoformat(), "sha256": memory_digest(memory), "memory": memory}
         copies = [record, *self._backup.get("copies", [])[:1]]
         await self._backup_store.async_save({"copies": copies})
+        if self._hass.state is not CoreState.stopping:
+            await self._hass.async_add_executor_job(verify_saved, self._backup_store.path, {"copies": copies})
         self._backup = {"copies": copies}
         self.backup_status.update(status="available", last_copy_at=record["created_at"])
 
     async def async_save(self) -> None:
         await self._store.async_save(deepcopy(self.data))
+        if self._hass.state is not CoreState.stopping:
+            await self._hass.async_add_executor_job(verify_saved, self._store.path, self.data)
         latest = (self._backup.get("copies") or [{}])[0]
         before = latest.get("memory", {})
         changed = any(self.data.get(key) != before.get(key) for key in MEMORY_KEYS)
