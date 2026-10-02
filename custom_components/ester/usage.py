@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from math import ceil
 
 
 def _minutes(value: str) -> int | None:
@@ -60,10 +61,15 @@ def usage_snapshot(profiles: list[dict], now: datetime, tz, horizon_minutes: int
             bucket["current"].append(profile)
             bucket["expected_occupancy"] = max(bucket["expected_occupancy"], float(profile["expected_occupancy"]))
             continue
-        # Bounded minute scan is simple and handles weekday/overnight boundaries correctly.
-        for offset in range(1, horizon_minutes + 1):
-            candidate = local_now + timedelta(minutes=offset)
-            if _contains(profile, candidate):
+        # Find scheduled boundaries directly, rather than scanning every future minute.
+        start = _minutes(profile["start_time"])
+        if start == _minutes(profile["end_time"]):
+            start = 0  # The existing equal-time convention means a whole calendar day.
+        for days_ahead in range(horizon_minutes//1440+2):
+            date = local_now+timedelta(days=days_ahead)
+            candidate = date.replace(hour=start//60, minute=start%60, second=0, microsecond=0)
+            offset = ceil((candidate-local_now).total_seconds()/60)
+            if candidate.weekday() in profile["weekdays"] and 0 < offset <= horizon_minutes:
                 bucket["upcoming"].append({
                     "profile_id": profile["profile_id"],
                     "label": profile.get("label", ""),

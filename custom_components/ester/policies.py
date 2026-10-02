@@ -17,6 +17,7 @@ from .seasonal import season_context
 from .knowledge_policy import prepare_profiles, apply_constraints
 from .brain import working_memory, decision_memory
 from .experiences import similar_cases
+from .deliberation import compare_alternatives
 
 
 def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None,
@@ -24,6 +25,9 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
              hot_water_models=None, occupancy_models=None, energy_runtime=None, knowledge=None, memory=None):
     frame = working_memory(memory or {"knowledge": knowledge or []}, profiles, now, preferences, contexts)
     knowledge, preferences, contexts = frame["knowledge"], frame["preferences"], frame["contexts"]
+    if memory is not None:
+        from .usage import usage_snapshot
+        usage = usage_snapshot(frame["usage_profiles"], now, local_tz or now.tzinfo)
     knowledge = knowledge or []
     profiles, _ = prepare_profiles(profiles, knowledge)
     thermal_models = thermal_models or {}
@@ -40,6 +44,19 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
     def usable(p):
         reported = timestamp(p.attributes.get("last_reported"))
         return p.state not in {None, "unknown", "unavailable"} and reported is not None and 0 <= now.timestamp() - reported <= 7200
+
+    def deliberate(area, current, target, horizon, allow_delayed):
+        solar_now = [p for p in profiles if usable(p) and p.role == "solar_power" and numeric_value(p) is not None]
+        load_now = [p for p in profiles if usable(p) and p.role == "load_power" and numeric_value(p) is not None]
+        surplus = max(0, numeric_value(solar_now[0])-numeric_value(load_now[0]))/1000 if len(solar_now)==len(load_now)==1 else None
+        model = thermal_models.get(area, {})
+        candidates = compare_climate_strategies(current_c=current, target_c=target, minutes_until_use=horizon,
+            model=model, energy_price_eur_kwh=number(preferences.get("energy_price_eur_kwh")),
+            estimated_power_kw=number(preferences.get(f"climate_power_kw:{area}")),
+            pv_surplus_kw=surplus, allow_delayed=allow_delayed)
+        comparison = compare_alternatives(candidates, target, preferences, model)
+        comparison["horizon_minutes"] = horizon
+        return comparison
 
     def emit(category, title, action, reason, entities=(), *, risk="low", impact="medium", question=None, evidence=None):
         ids = [p.entity_id for p in entities]
@@ -60,7 +77,8 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
         d = engine.build_decision(category=category, title=title, proposed_action=action,
             reasoning=reason, confidence=confidence, risk=RiskLevel(risk), impact=ImpactLevel(impact),
             area_id=entities[0].area_id if entities else None, entity_ids=ids, evidence=payload,
-            alternatives=["Mantenere lo stato attuale e continuare a osservare", "Verificare dati e preferenze con una persona"])
+            alternatives=([f"{r['strategy']}: temperatura prevista {r.get('predicted_temp_at_use')} °C, costo stimato {r.get('estimated_cost_eur')} €" for r in payload["comparison"]["candidates"]]
+                          if payload.get("comparison") else ["Mantenere lo stato attuale e continuare a osservare", "Verificare dati e preferenze con una persona"]))
         d.outcome = {"type": "not_executed", "reason": "permanent_shadow_mode"}
         decisions.append(d)
 
@@ -80,7 +98,7 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
         learned_occ = predicted_occupancy(occupancy_models.get(area, {}), local_now)
         if learned_occ is not None:
             expected_now = max(expected_now, learned_occ)
-        upcoming = expected.get("upcoming", [])
+        upcoming = [r for r in expected.get("upcoming", []) if float(r.get("expected_occupancy", 0) or 0) >= .5]
         presence = [p for p in local if p.role == "presence" and p.domain == "binary_sensor"]
         occupied = any(p.state == "on" for p in presence)
         absent = bool(presence) and all(p.state == "off" for p in presence)
@@ -97,7 +115,20 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
         elif active_modes == {"cool"}:
             season = "summer"
         target = number(preferences.get(f"seasonal_comfort:{season}:{area}", preferences.get(f"comfort:{area}")))
-        if climates and temps:
+        routine_targets = {number(r.get("comfort_c")) for r in expected.get("current", []) if float(r.get("expected_occupancy", 0) or 0) >= .5 and number(r.get("comfort_c")) is not None}
+        if not expected.get("current") and not occupied and upcoming:
+            routine_targets = {number(r.get("comfort_c")) for r in upcoming if r["minutes_until"] == upcoming[0]["minutes_until"] and number(r.get("comfort_c")) is not None}
+        routine_conflict = len(routine_targets)>1
+        if routine_conflict and climates and temps:
+            emit("climate", "Comfort delle abitudini in conflitto", "Chiarire le abitudini sovrapposte",
+                 "Abitudini attive nella stessa stanza indicano temperature diverse.", temps+climates,
+                 question=f"Ci sono abitudini in conflitto in {area}: {sorted(routine_targets)} °C. Quale resta valida?",
+                 evidence={"routine_conflicts":sorted(routine_targets), "expected_use":expected})
+        elif routine_targets:
+            target = next(iter(routine_targets))
+        elif target is None and not occupied and expected_now<.5 and upcoming:
+            target = number(upcoming[0].get("comfort_c"))
+        if climates and temps and not routine_conflict:
             if target is None:
                 emit("climate", "Comfort da definire", "Raccogliere la temperatura desiderata",
                      "La temperatura obiettivo non viene dedotta dal nome della stanza.", temps + climates,
@@ -118,44 +149,36 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
                         action = "Valutare riscaldamento a gas"
                     else:
                         action = "Valutare riscaldamento" if t < target else "Valutare raffrescamento"
+                    comparison = deliberate(area, t, target, 30, False)
+                    if comparison["selected_strategy"] == "wait":
+                        action = "Mantenere lo stato attuale e osservare l'evoluzione termica"
                     emit("climate", "Scostamento dal comfort", action,
-                         f"Stanza occupata o prevista in uso: {t:.1f} °C rispetto a {target:.1f} °C.",
+                         f"Stanza occupata o prevista in uso: {t:.1f} °C rispetto a {target:.1f} °C. Confronto a 30 minuti: {comparison['reason']}",
                          temps + climates + presence, risk="medium",
                          evidence={"target_c": target, "comfort_season": season, "expected_use": expected,
-                                   "learned_occupancy": learned_occ, "heating_economics": econ})
+                                   "learned_occupancy": learned_occ, "heating_economics": econ, "comparison":comparison})
             elif upcoming and "vacation" not in scope_modes:
                 next_use = upcoming[0]
                 t = sum(numeric_value(p) for p in temps) / len(temps)
                 use_target = number(next_use.get("comfort_c")) or target
-                if use_target is not None and abs(t - use_target) >= 1 and next_use["minutes_until"] <= 120:
+                if use_target is not None and next_use["minutes_until"] <= 120:
                     model = thermal_models.get(area, {})
-                    strategies = compare_climate_strategies(
-                        current_c=t,
-                        target_c=use_target,
-                        minutes_until_use=next_use["minutes_until"],
-                        model=model,
-                        energy_price_eur_kwh=number(preferences.get("energy_price_eur_kwh")),
-                        estimated_power_kw=number(preferences.get(f"climate_power_kw:{area}")),
-                    )
-                    pre = next((s for s in strategies if s["strategy"] == "precondition"), None)
-                    if pre:
-                        action = f"Valutare pre-climatizzazione tra {pre['start_in_minutes']} minuti"
-                        reason = (
-                            f"Uso previsto tra {next_use['minutes_until']} minuti; temperatura {t:.1f} °C, "
-                            f"target {use_target:.1f} °C. Il modello locale stima circa "
-                            f"{pre['estimated_runtime_minutes']} minuti di climatizzazione."
-                        )
+                    comparison = deliberate(area, t, use_target, next_use["minutes_until"], True)
+                    strategies = comparison["candidates"]
+                    selected = next((s for s in strategies if s["selected"]), None)
+                    if selected and selected["strategy"] != "wait":
+                        action = (f"Valutare pre-climatizzazione tra {selected['start_in_minutes']} minuti"
+                                  if selected["start_in_minutes"] else "Valutare pre-climatizzazione subito")
+                    elif selected:
+                        action = "Attendere e continuare a osservare prima dell'uso previsto"
                     else:
                         action = "Continuare a osservare prima di pre-climatizzare"
-                        reason = (
-                            f"Uso previsto tra {next_use['minutes_until']} minuti; temperatura {t:.1f} °C, "
-                            f"target {use_target:.1f} °C. Non ci sono ancora abbastanza dati termici locali "
-                            "per stimare un anticipo affidabile."
-                        )
+                    reason = (f"Uso previsto tra {next_use['minutes_until']} minuti; temperatura {t:.1f} °C, "
+                              f"target {use_target:.1f} °C. {comparison['reason']}")
                     emit("climate", "Uso stanza previsto", action, reason,
                          temps + climates + presence, risk="medium",
                          evidence={"target_c": use_target, "comfort_season": season, "expected_use": expected,
-                                   "thermal_model": model, "strategies": strategies,
+                                   "thermal_model": model, "strategies": strategies, "comparison":comparison,
                                    "temperature_entity_ids": [p.entity_id for p in temps]})
             elif "vacation" in scope_modes:
                 emit("climate", "Modalità vacanza", "Valutare un profilo di mantenimento da concordare",
@@ -384,5 +407,7 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
              question="A quali stanze appartengono le entità?")
     decisions = decision_memory(apply_constraints(decisions, profiles, knowledge), frame)
     for decision in decisions:
+        if decision.evidence.get("comparison") and (decision.evidence.get("knowledge_blockers") or decision.evidence.get("brain_conflicts") or decision.evidence.get("routine_conflicts")):
+            decision.evidence["comparison"]["blocked"] = True
         decision.evidence["similar_experiences"] = similar_cases(memory or {}, decision)
     return decisions

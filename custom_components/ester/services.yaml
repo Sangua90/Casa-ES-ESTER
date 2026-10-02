@@ -1,3 +1,14 @@
+preview_memory_understanding:
+  name: "Analizza le informazioni conservate"
+  description: "Propone valori e abitudini ricavabili dalle fonti attive. Richiede conferma prima di applicarli."
+retract_interpretation:
+  name: "Ritira un'interpretazione operativa"
+  description: "Esclude un valore o un'abitudine dalle valutazioni, conservando la fonte e lo storico."
+  fields:
+    knowledge_id:
+      required: true
+      selector:
+        text: {}
 get_brain:
   name: "Leggi il cervello"
   description: "Memoria condivisa, validità, fonti, esperienze e valutazioni Shadow."

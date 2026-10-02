@@ -6,6 +6,40 @@ sono accessibili da Dettagli tecnici; Decisioni e CORE restano nel menu principa
 
 ## Memoria che entra nelle valutazioni
 
+Dalla 1.7 il racconto `In studio preferisco 21 gradi; in studio lavoro dalle 9
+alle 18 nei feriali` propone un comfort e un'abitudine separati. Il parser locale
+riconosce nomi/ID delle stanze, temperature esplicite, prezzo in euro/kWh, intervalli
+orari e giorni dichiarati. Non completa campi mancanti né trasforma una negazione
+o condizione in una regola generale. Un'abitudine indica presenza dichiarata,
+non una probabilità misurata. L'anteprima precede sempre la conferma.
+
+**File e insegnamenti → Analizza le informazioni già conservate** prepara
+interpretazioni delle fonti precedenti senza attivarle subito. I riferimenti
+relativi oggi/domani delle vecchie fonti usano la data originale, non quella
+dell'analisi. Gli insegnamenti incompleti si possono completare con un nuovo
+racconto collegato alla fonte. Puoi ritirare i valori interpretati; originali e
+storico restano conservati e le interpretazioni discendenti non sopravvivono
+al ritiro o alla scadenza della fonte. JSON v2 supporta anche `routine` con
+`start_time`, `end_time`, `weekdays` (0=lunedì), `expected_occupancy` e
+`comfort_c` facoltativo. Informazioni contraddittorie richiedono chiarimento.
+
+Le proposte climatiche mostrano il confronto fra attesa, climatizzazione ora
+e anticipazione dell'uso previsto. Usano tassi termici locali e, quando disponibili,
+potenza e prezzo configurati. Le stime descrivono energia aggiuntiva e costo
+condizionato della climatizzazione elettrica; non confrontano ogni impianto o
+ottimizzano tutta la casa. Il modello lineare rispetta il tempo disponibile:
+se il target non è raggiungibile lo dichiara. Il comfort ha precedenza nella
+fattibilità; i pesi comfort/costo/energia ordinano le alternative ammissibili.
+Il punteggio relativo non è una probabilità di successo.
+
+Una potenza o tariffa mancante resta sconosciuta. L'uso del surplus FV osservato
+per un intervento immediato assume che rimanga costante: l'ipotesi è visibile e
+non viene estesa alle partenze future. Non è una previsione di produzione.
+La fiducia di una scelta modellata non può superare la fiducia del modello.
+I vincoli fisici e della memoria continuano a bloccare le proposte interessate.
+Gli orari futuri vengono cercati direttamente nel calendario, senza interrogare
+un modello AI a ogni valutazione. Shadow Mode rimane attivo.
+
 Il motore locale usa una memoria di lavoro comune per valutazioni correnti,
 replay e scenari. Filtra la validità temporale, risolve preferenze e contesti,
 poi confronta questi dati con sensori, abitudini e modelli termici/di presenza.

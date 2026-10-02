@@ -70,6 +70,15 @@ class GeminiProvider(AIProvider):
                         "area_id": {"type": "string"}, "subject": {"type": "string"},
                         "condition": {"type": "string"}, "time_window": {"type": "string"},
                         "priority": {"type": "string"}, "supersedes_hint": {"type": "string"},
+                        "effect": {"type":"object", "properties":{
+                            "type":{"type":"string","enum":["comfort","energy_price"]}, "value":{"type":"number"},
+                            "season":{"type":"string","enum":["all","winter","summer","shoulder"]}}, "required":["type","value"]},
+                        "routine": {"type":"object", "properties":{
+                            "start_time":{"type":"string"}, "end_time":{"type":"string"},
+                            "weekdays":{"type":"array","items":{"type":"integer","minimum":0,"maximum":6}},
+                            "expected_occupancy":{"type":"number","minimum":0,"maximum":1},
+                            "comfort_c":{"type":"number","minimum":5,"maximum":35}},
+                            "required":["start_time","end_time","weekdays","expected_occupancy"]},
                     },
                     "required": ["domain","kind","statement","confidence"],
                 }},
@@ -84,7 +93,11 @@ class GeminiProvider(AIProvider):
             "Non trasformare 'di solito' in una regola assoluta. Conserva condizioni, orari e priorità nel significato. "
             "Usa area_id solo se presente nell'elenco allowed_area_ids; altrimenti omettilo. "
             "Se l'utente corregge una vecchia informazione, descrivi in supersedes_hint quale conoscenza precedente sostituisce. "
-            "Non inventare dettagli mancanti."
+            "Non inventare dettagli mancanti. effect è ammesso soltanto per temperature di comfort esplicite "
+            "(type comfort, value °C, area_id obbligatorio) o prezzo energia esplicito (type energy_price, value €/kWh, senza area). "
+            "routine è ammessa soltanto quando stanza, ora iniziale, ora finale e giorni sono dichiarati: weekdays 0=lunedì..6=domenica. "
+            "Per un uso esplicito expected_occupancy=1 rappresenta l'intenzione dichiarata, non una probabilità misurata. "
+            "Non trasformare condizioni, negazioni o dati mancanti in effetti incondizionati; lasciali nel testo."
         )
         result = await self._generate({"message": message, "context": context}, system=system, schema=schema)
         try: structured = json.loads(result.text)

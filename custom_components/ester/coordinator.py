@@ -153,7 +153,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             )
 
             contexts = active_contexts(data["context_events"], now)
-            usage = usage_snapshot(data.get("usage_profiles", []), now, ZoneInfo(self.hass.config.time_zone))
+            usage = usage_snapshot(frame["usage_profiles"], now, ZoneInfo(self.hass.config.time_zone))
             proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage, data["thermal_models"], data.get("flexible_loads", []), ZoneInfo(self.hass.config.time_zone), data.get("ventilation_models", {}), data.get("hot_water_models", {}), data.get("occupancy_models", {}), data.get("energy_runtime", {}), memory=data)
             suggestions = data_suggestions(profiles)
             outside_values = [
@@ -191,8 +191,14 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 conf = calibrated_confidence(payload, data.get("calibration", {}))
                 payload["evidence"]["confidence_calibration"] = conf
                 payload["confidence"] = conf["calibrated"]
+                comparison = payload["evidence"].get("comparison", {})
+                if comparison.get("selected_strategy"):
+                    model_confidence = comparison.get("model_confidence")
+                    cap = max(0, min(1, model_confidence)) if model_confidence is not None else .4
+                    payload["confidence"] = min(payload["confidence"], cap)
+                    payload["evidence"]["thermal_confidence_cap"] = cap
                 threshold = self.engine.risk_policy.threshold(RiskLevel(payload["risk"]))
-                payload["status"] = "needs_input" if payload["evidence"].get("brain_conflicts") else ("suppressed" if payload["evidence"].get("knowledge_blockers") else ("shadow" if payload["confidence"] >= threshold else "needs_input"))
+                payload["status"] = "needs_input" if payload["evidence"].get("brain_conflicts") or payload["evidence"].get("routine_conflicts") else ("suppressed" if payload["evidence"].get("knowledge_blockers") else ("shadow" if payload["confidence"] >= threshold else "needs_input"))
                 payload["evidence"]["objective_score"] = score_decision(payload, frame["preferences"])
                 key = hashlib.sha256(json.dumps([payload["category"], payload["area_id"], payload["title"], sorted(payload["entity_ids"]),
                                                 payload["proposed_action"], payload["evidence"].get("modes")]).encode()).hexdigest()[:24]

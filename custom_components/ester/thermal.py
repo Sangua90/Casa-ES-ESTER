@@ -65,28 +65,10 @@ def minutes_to_target(current_c: float, target_c: float, active_rate_c_per_h: fl
 
 def compare_climate_strategies(*, current_c: float, target_c: float, minutes_until_use: int,
                                model: dict, energy_price_eur_kwh: float | None = None,
-                               estimated_power_kw: float | None = None) -> list[dict]:
-    """Compare wait vs precondition using only locally learned rates."""
-    passive = model.get("passive_rate_c_per_h")
-    active = model.get("active_rate_c_per_h")
-    wait_temp = predict_temperature(current_c, minutes_until_use, passive)
-    needed = minutes_to_target(current_c, target_c, active)
-    options = [{
-        "strategy": "wait",
-        "start_in_minutes": None,
-        "predicted_temp_at_use": wait_temp,
-        "estimated_cost_eur": 0.0,
-    }]
-    if needed is not None:
-        start_in = max(0, minutes_until_use - needed)
-        cost = None
-        if energy_price_eur_kwh is not None and estimated_power_kw is not None:
-            cost = round(max(0, needed) / 60 * estimated_power_kw * energy_price_eur_kwh, 3)
-        options.append({
-            "strategy": "precondition",
-            "start_in_minutes": start_in,
-            "predicted_temp_at_use": target_c,
-            "estimated_runtime_minutes": needed,
-            "estimated_cost_eur": cost,
-        })
-    return options
+                               estimated_power_kw: float | None = None, pv_surplus_kw=None,
+                               allow_delayed=True) -> list[dict]:
+    """Predict wait/now/delayed alternatives without assuming an unreachable target."""
+    from .deliberation import climate_candidates
+    return climate_candidates(current_c=current_c, target_c=target_c, minutes_until_use=minutes_until_use,
+        model=model, energy_price_eur_kwh=energy_price_eur_kwh, estimated_power_kw=estimated_power_kw,
+        pv_surplus_kw=pv_surplus_kw, allow_delayed=allow_delayed)

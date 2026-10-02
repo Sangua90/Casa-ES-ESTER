@@ -77,6 +77,65 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
         return await self.client.post("/api/ester/knowledge/upload", data=body,
                                       headers={"Authorization": f"Bearer {token or self.token}"})
 
+    async def configure_teaching_room(self):
+        from homeassistant.helpers import area_registry
+        room = area_registry.async_get(self.hass).async_create("Studio")
+        self.hass.states.async_set("sensor.room_temp", "18", {"device_class":"temperature", "unit_of_measurement":"°C"})
+        self.hass.states.async_set("climate.room", "heat", {})
+        self.hass.states.async_set("binary_sensor.room_presence", "on", {"device_class":"occupancy"})
+        self.store.data["classifications"] = {"sensor.room_temp":{"role":"temperature","area_id":room.id},
+            "climate.room":{"role":"climate","area_id":room.id},
+            "binary_sensor.room_presence":{"role":"presence","area_id":room.id}}
+        self.runtime.entry = SimpleNamespace(options={"ai_provider":"disabled"})
+        self.runtime.data = {"rooms":{room.id:{"name":room.name}}}
+        return room
+
+    async def test_understanding_confirmation_reanalysis_retirement_and_restart(self):
+        from homeassistant.core import Context
+        from homeassistant.util import dt as dt_util
+        from custom_components.ester.coordinator import EsterCoordinator
+        from custom_components.ester.discovery import discover_entities
+        from custom_components.ester.brain import working_memory
+        room = await self.configure_teaching_room()
+        async def call(service, data):
+            return await self.hass.services.async_call("ester", service, data, blocking=True,
+                return_response=service!="retract_interpretation", context=Context(user_id=self.admin.id))
+        proposal = await call("interpret_message", {"message":"In studio preferisco 21 gradi; in studio lavoro dalle 9 alle 18 nei feriali"})
+        self.assertEqual(len(proposal["items"]), 2)
+        self.assertEqual(self.store.data["knowledge"], [])
+        self.assertEqual((await self.confirm(proposal))["saved"], 2)
+        restored = type(self.store)(self.hass)
+        await restored.async_load()
+        profiles = discover_entities(self.hass, restored.data["classifications"])
+        frame = working_memory(restored.data, profiles, dt_util.utcnow())
+        self.assertEqual(frame["preferences"][f"comfort:{room.id}"], 21)
+        self.assertEqual(frame["usage_profiles"][0]["start_time"], "09:00")
+        coordinator = EsterCoordinator(self.hass, None, restored)
+        with patch.object(type(self.hass.services), "async_call", side_effect=AssertionError("Device services forbidden")):
+            live = await coordinator._async_update_data()
+        self.assertTrue(any(d["evidence"].get("target_c")==21 and d["evidence"].get("comparison") for d in live["latest_decisions"]))
+        with patch("custom_components.ester.coordinator.build_room_thermal_model", return_value={"active_rate_c_per_h":2,"passive_rate_c_per_h":-.2,"confidence":.2}):
+            modeled = await coordinator._async_update_data()
+        selected = next(d for d in modeled["latest_decisions"] if d["evidence"].get("comparison", {}).get("selected_strategy"))
+        self.assertLessEqual(selected["confidence"], .2)
+        self.assertEqual(selected["status"], "needs_input")
+        self.store.data["knowledge"].append({"knowledge_id":"legacy-price","statement":"Il costo energia è 0,25 euro/kWh",
+            "status":"active","created_at":dt_util.utcnow().isoformat(),"source":"knowledge_file","source_file":"tariffa.txt"})
+        preview = await call("preview_memory_understanding", {})
+        self.assertEqual(preview["items"][0]["derived_from"], "legacy-price")
+        self.assertNotIn("energy_price_eur_kwh", (await call("get_brain", {}))["preferences"])
+        await self.confirm(preview)
+        self.assertEqual((await call("get_brain", {}))["preferences"]["energy_price_eur_kwh"], .25)
+        child = next(r for r in self.store.data["knowledge"] if r.get("derived_from")=="legacy-price")
+        before = dict(child)
+        with patch.object(self.store, "async_save", side_effect=OSError("disk failed")):
+            with self.assertRaises(OSError):
+                await call("retract_interpretation", {"knowledge_id":child["knowledge_id"]})
+        self.assertEqual(child, before)
+        await call("retract_interpretation", {"knowledge_id":child["knowledge_id"]})
+        self.assertNotIn("energy_price_eur_kwh", (await call("get_brain", {}))["preferences"])
+        self.assertTrue(any(r["knowledge_id"]=="legacy-price" for r in self.store.data["knowledge"]))
+
     async def confirm(self, proposal):
         from homeassistant.core import Context
         return await self.hass.services.async_call("ester", "confirm_teaching",
@@ -273,6 +332,59 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
             await page.locator('summary').filter(has_text='MEMORIA CONSERVATA').click()
             await page.locator('[data-brain-retract]').click()
             await page.wait_for_function("!('energy_price_eur_kwh' in document.querySelector('ester-panel')._brain.preferences)")
+            await page.wait_for_function("!document.querySelector('ester-panel')._busy")
+            room = await self.configure_teaching_room()
+            await page.evaluate('''rooms => {
+              const panel=document.querySelector('ester-panel');
+              panel._hass.states={'sensor.e_s_t_e_r_summary':{attributes:{rooms}}}; panel.render();
+            }''', self.runtime.data['rooms'])
+            await page.locator('summary').filter(has_text='FILE E INSEGNAMENTI').click()
+            await page.locator('#teach').fill('In studio preferisco 21 gradi; in studio lavoro dalle 9 alle 18 nei feriali')
+            await page.locator('#teach-send').click()
+            await page.locator('#teach-confirm').wait_for()
+            self.assertIn('Valore operativo', await page.locator('.teach-review').inner_text())
+            self.assertIn('09:00–18:00', await page.locator('.teach-review').inner_text())
+            self.assertFalse(any(r.get('effect') for r in self.store.data['knowledge']))
+            await page.locator('#teach-confirm').click()
+            await page.wait_for_function("document.querySelector('ester-panel')._teachDraft===null && !document.querySelector('ester-panel')._busy")
+            self.assertEqual(len(self.store.data['knowledge']), 5)
+            self.assertEqual((await page.evaluate("document.querySelector('ester-panel')._brain.preferences"))[f'comfort:{room.id}'], 21)
+            await page.locator('summary').filter(has_text='FILE E INSEGNAMENTI').click()
+            await page.locator('#teach').fill('In studio lavoro fino alle 18')
+            await page.locator('#teach-send').click()
+            await page.locator('#teach-confirm').wait_for()
+            self.assertIn('Da chiarire', await page.locator('.teach-review').inner_text())
+            await page.locator('#teach-confirm').click()
+            await page.wait_for_function("document.querySelector('ester-panel')._teachDraft===null && !document.querySelector('ester-panel')._busy")
+            await page.locator('summary').filter(has_text='INSEGNAMENTI DA COMPLETARE').click()
+            await page.locator('[data-teaching-complete]').click()
+            self.assertEqual(await page.locator('#teach').input_value(), 'In studio lavoro fino alle 18')
+            await page.locator('#teach').fill('In studio lavoro dalle 10 alle 18 ogni sabato')
+            await page.locator('#teach-send').click()
+            await page.locator('#teach-confirm').wait_for()
+            await page.locator('#teach-confirm').click()
+            await page.wait_for_function("document.querySelector('ester-panel')._teachDraft===null && !document.querySelector('ester-panel')._busy")
+            self.assertTrue(any(r.get('derived_from') and r.get('routine') for r in self.store.data['knowledge']))
+            from custom_components.ester.coordinator import EsterCoordinator
+            with patch.object(type(self.hass.services), 'async_call', side_effect=AssertionError('Device services forbidden')):
+                live = await EsterCoordinator(self.hass, None, self.store)._async_update_data()
+            from custom_components.ester.discovery import discover_entities
+            from custom_components.ester.decision_engine import EsterDecisionEngine
+            from custom_components.ester.policies import evaluate
+            from homeassistant.util import dt as dt_util
+            modeled = evaluate(EsterDecisionEngine(), discover_entities(self.hass, self.store.data['classifications']),
+                {}, [], {}, [], dt_util.utcnow(), memory=self.store.data,
+                thermal_models={room.id:{'active_rate_c_per_h':2,'passive_rate_c_per_h':-.2,'confidence':.7}})
+            live['latest_decisions'] = [d.as_dict() for d in modeled]
+            await page.evaluate('''latest => {
+              const panel=document.querySelector('ester-panel'); panel._tab='decisions';
+              panel._hass.states['sensor.e_s_t_e_r_shadow_decisions']={state:String(latest.length),attributes:{latest}};
+              panel.render();
+            }''', live['latest_decisions'])
+            await page.locator('.deliberation summary').first.click()
+            self.assertIn('Attendere', await page.locator('.deliberation').first.inner_text())
+            self.assertIn('Climatizzare ora', await page.locator('.deliberation').first.inner_text())
+            self.assertIn('Dato non disponibile', await page.locator('.deliberation').first.inner_text())
             if os.environ.get('ESTER_BRAIN_SCREENSHOT'):
                 await page.screenshot(path=os.environ['ESTER_BRAIN_SCREENSHOT'], full_page=True)
             self.assertTrue(await page.evaluate('document.documentElement.scrollWidth <= innerWidth'))

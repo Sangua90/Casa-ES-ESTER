@@ -189,7 +189,7 @@ class EsterPanel extends HTMLElement {
     try {
       const result = await this._hass.callWS({
         type:"call_service", domain:"ester", service:"interpret_message",
-        service_data:{message, preview:true}, return_response:true
+        service_data:{message, preview:true,...(this._teachingParent?{source_knowledge_id:this._teachingParent}:{})}, return_response:true
       });
       this._teachDraft = result?.response || result || null;
       this._notice = this._teachDraft?.summary || "Controlla quello che ho capito prima di salvarlo.";
@@ -212,6 +212,7 @@ class EsterPanel extends HTMLElement {
       });
       const response = result?.response || result || {};
       this._teachDraft = null;
+      this._teachingParent=null;
       this._notice = response?.summary || "Conoscenze salvate.";
       if (this._uploadProgress === 100) this.updateUploadStatus(this._notice);
       await this.loadFileCollection();
@@ -230,7 +231,7 @@ class EsterPanel extends HTMLElement {
     if (token && this._hass) {
       try { await this._hass.callService("ester","discard_teaching",{proposal_id:token}); } catch (_) {}
     }
-    this._teachDraft=null; this._notice=isFile ? "Proposta scartata. Il file resta nella raccolta; non ho aggiunto conoscenze." : "Proposta scartata. Non ho modificato la memoria.";
+    this._teachDraft=null; this._teachingParent=null; this._notice=isFile ? "Proposta scartata. Il file resta nella raccolta; non ho aggiunto conoscenze." : "Proposta scartata. Non ho modificato la memoria.";
     await this.loadFileCollection(); this.render();
   }
 
@@ -526,6 +527,8 @@ class EsterPanel extends HTMLElement {
         </div>
         <div class="decision-section primary"><span>LA MIA PROPOSTA</span><strong>${this.esc(d.proposed_action)}</strong></div>
         <details class="decision-reason"><summary>Perché questa proposta?</summary><p>${this.esc(d.reasoning)}</p></details>
+        ${this.comparisonView(d.evidence?.comparison)}
+        ${(d.evidence?.brain_routines||[]).length ? '<details><summary>Abitudini utilizzate nella previsione</summary>'+d.evidence.brain_routines.map(r=>'<p>'+this.esc(r.statement)+'</p>').join("")+'</details>':""}
         ${d.decision_id ? `<details><summary>Dai un riscontro e alimenta il cervello</summary><p>Valuta la proposta, anche se non è stata eseguita. Il riscontro non viene presentato come risparmio misurato.</p>${[["correct","CORRETTA"],["partial","PARZIALE"],["wrong","SBAGLIATA"]].map(([rating,label])=>`<button data-decision-feedback="${this.esc(d.decision_id)}" data-rating="${rating}" ${this._busy?"disabled":""}>${label}</button>`).join("")}</details>`:""}
         ${(d.evidence?.knowledge_context || []).length ? '<details><summary>Memoria considerata</summary>'+d.evidence.knowledge_context.map(k=>'<p>'+this.esc(k.statement)+'<br><small>'+this.esc(k.application === "constraint_applied" ? "Vincolo applicato: proposta sospesa" : "Solo contesto: nessuna regola automatica ricavata")+'</small></p>').join("")+'</details>' : ''}
         ${(d.evidence?.brain_preferences||[]).length ? '<details><summary>Valori dalla memoria condivisa</summary>'+d.evidence.brain_preferences.map(p=>'<p>'+this.esc(p.key)+' = '+this.esc(String(p.value))+' · '+this.esc(p.source_file||p.source||"preferenza")+'</p>').join("")+'</details>':""}
@@ -948,6 +951,33 @@ class EsterPanel extends HTMLElement {
     URL.revokeObjectURL(url);
   }
 
+  comparisonView(comparison) {
+    if(!comparison)return "";
+    const labels={wait:"Attendere",condition_now:"Climatizzare ora",precondition:"Anticipare l'uso previsto"};
+    const quantity=(v,unit)=>v==null?"Dato non disponibile":this.esc(String(v))+" "+unit;
+    return `<details class="deliberation"><summary>${comparison.blocked?"Confronto sospeso: vincoli da chiarire":"Alternative confrontate"}</summary><p>${this.esc(comparison.reason)}</p><p>Orizzonte: ${this.esc(String(comparison.horizon_minutes))} minuti. Temperature, energia e costi sono stime.</p>
+      ${comparison.candidates.map(c=>`<article class="control"><b>${this.esc(labels[c.strategy]||c.strategy)}${c.selected?" · PREFERITA NEL CONFRONTO":""}</b><p>Temperatura prevista: ${quantity(c.predicted_temp_at_use,"°C")}<br>Energia aggiuntiva: ${quantity(c.estimated_energy_kwh,"kWh")}<br>Acquisto dalla rete: ${quantity(c.estimated_grid_energy_kwh,"kWh")}<br>Costo condizionato: ${quantity(c.estimated_cost_eur,"€")}</p><p>${c.meets_comfort?"Comfort previsto rispettato":"Comfort non raggiunto o non stimabile"}${c.start_in_minutes==null?"":" · avvio tra "+c.start_in_minutes+" min"}</p><details><summary>Ipotesi della stima</summary>${c.assumptions.map(a=>`<p>${this.esc(a)}</p>`).join("")}</details></article>`).join("")}
+      ${comparison.uncertainties.map(u=>`<p class="hint">${this.esc(u)}</p>`).join("")}<p>La preferenza nel confronto non dimostra un successo o un risparmio reale.</p></details>`;
+  }
+
+  teachingMeaning(item) {
+    const days=["lunedì","martedì","mercoledì","giovedì","venerdì","sabato","domenica"];
+    return `${item.effect?`<p><b>Valore operativo:</b> ${item.effect.type==="comfort"?"Comfort":"Costo energia"} ${this.esc(String(item.effect.value))} ${item.effect.type==="comfort"?"°C":"€/kWh"} · ${this.esc(this.roomName(item.area_id))} · ${this.esc(item.effect.season||"sempre")}</p>`:""}
+      ${item.routine?`<p><b>Uso previsto:</b> ${this.esc(this.roomName(item.area_id))}, ${this.esc(item.routine.start_time)}–${this.esc(item.routine.end_time)}, ${item.routine.weekdays.map(d=>days[d]).join(", ")}. Presenza dichiarata ${this.esc(String(item.routine.expected_occupancy))}${item.routine.comfort_c==null?"":" · comfort "+this.esc(String(item.routine.comfort_c))+" °C"}.</p>`:""}
+      ${item.starts_at?`<small>Valida da ${this.esc(new Date(item.starts_at).toLocaleString("it-IT"))}</small>`:""}${item.expires_at?`<small>Scade ${this.esc(new Date(item.expires_at).toLocaleString("it-IT"))}</small>`:""}
+      ${(item.clarifications||[]).map(q=>`<p role="status">Da chiarire: ${this.esc(q)}</p>`).join("")}`;
+  }
+
+  async understandMemory() {
+    if(this._busy)return;this._busy=true;
+    try {
+      const result=await this._hass.callWS({type:"call_service",domain:"ester",service:"preview_memory_understanding",service_data:{},return_response:true});
+      this._teachDraft=result.response||result;
+      this._notice=this._teachDraft.summary;
+    }catch(error){this._notice="Analisi non completata: "+error.message;}
+    finally{this._busy=false;this.render();}
+  }
+
   async decisionFeedback(id, rating) {
     if(this._busy)return; this._busy=true;
     try {
@@ -996,18 +1026,18 @@ class EsterPanel extends HTMLElement {
     const metric=(label,value)=>`<div><b>${this.esc(String(value ?? "…"))}</b><span>${label}</span></div>`;
     return `<div class="simple-status-grid brain-metrics">${metric("Tasselli attivi",c.active)}${metric("File conservati",b?.documents?.count)}${metric("Risposte conservate",c.answered_questions)}${metric("Modelli dallo storico",b ? Object.values(b.models||{}).reduce((n,v)=>n+v,0):undefined)}</div>
       <p role="status">${this._brainLoading ? "Verifica della memoria in corso…" : e.evaluated_at ? `Ultima valutazione: ${this.esc(new Date(e.evaluated_at).toLocaleString("it-IT"))} · ${e.decisions_evaluated} proposte · ${e.duration_ms} ms (lettura storico inclusa).` : "In attesa della prima valutazione misurata."}</p>
-      <p>${c.preferences ?? "…"} preferenze · ${c.routines ?? "…"} abitudini · ${c.expired ?? "…"} note scadute · ${c.conflicts ?? "…"} conflitti. ${b?.documents?.bytes ?? "…"} byte di file conservati.</p>`;
+      <p>${c.preferences ?? "…"} preferenze · ${c.routines ?? "…"} abitudini · ${c.operational ?? "…"} insegnamenti operativi · ${c.to_clarify ?? "…"} da completare · ${c.expired ?? "…"} note scadute · ${c.conflicts ?? "…"} conflitti. ${b?.documents?.bytes ?? "…"} byte di file conservati.</p>`;
   }
 
   brainView() {
     const b=this._brain;
     const states={active:"ATTIVA",expired:"SCADUTA",superseded:"AGGIORNATA",retracted:"RITIRATA",scheduled:"FUTURA"};
-    const usage={context_only:"Contesto disponibile: non implica una regola operativa",preference_applied:"Valore operativo disponibile al motore",conflict:"Conflitto: decisioni coinvolte da chiarire",inactive:"Esclusa dalla valutazione",needs_review:"Da verificare",explicit_preference_priority:"Prevale la preferenza già confermata",temporary_note_priority:"Prevale la nota aggiornata"};
+    const usage={context_only:"Contesto disponibile: non implica una regola operativa",routine_applied:"Abitudine disponibile alle previsioni",preference_applied:"Valore operativo disponibile al motore",conflict:"Conflitto: decisioni coinvolte da chiarire",inactive:"Esclusa dalla valutazione",needs_review:"Da verificare",explicit_preference_priority:"Prevale la preferenza già confermata",temporary_note_priority:"Prevale la nota aggiornata"};
     const rooms=Object.entries(this.summary().rooms||{});
     return this.viewHeader("MEMORIA / RAGIONAMENTO","CERVELLO","Alimenta la memoria della casa e verifica come entra nelle decisioni.",String(b?.counts?.active ?? "…"),"TASSELLI ATTIVI")+`
       <article class="control"><div id="brain-stats">${this.brainStats()}</div><button id="brain-refresh" ${this._brainLoading?"disabled":""}>VERIFICA MEMORIA E VALUTAZIONI</button>${this._brainError?`<p role="alert">${this.esc(this._brainError)}</p>`:""}<p>Valutazioni locali su sensori, memoria e previsioni. Verifica le motivazioni e dai riscontri per migliorarle. Shadow Mode: nessuna attuazione fisica.</p><button data-tab="decisions">VEDI COME STA DECIDENDO</button></article>
       <details class="control" open><summary>DOMANDE DA CHIARIRE</summary><div id="brain-questions">${this.groupedQuestionCards()}</div><details><summary>Rispondi con un file preparato con ChatGPT</summary>${this.questionFileControls()}</details></details>
-      <details class="control"><summary>FILE E INSEGNAMENTI</summary>${this.teachView(true)}</details>
+      <details class="control"><summary>FILE E INSEGNAMENTI</summary><button id="brain-understand" ${this._busy?"disabled":""}>ANALIZZA LE INFORMAZIONI GIÀ CONSERVATE</button><p>Ti mostro valori e abitudini che posso ricavare dalle fonti. Diventano operativi dopo la tua conferma.</p>${this.teachView(true)}</details>
       <details class="control"><summary>INFORMAZIONI CHE CAMBIANO NEL TEMPO</summary><p>Una nota può avere una scadenza. Per modificare comfort o costo energia, indica anche il valore: una frase libera rimane contesto finché non viene interpretata e confermata.</p>
         <label>Nota<textarea id="brain-note" data-brain-field placeholder="Per esempio: questa settimana lavoriamo da casa"></textarea></label>
         <label>Argomento<select id="brain-domain" data-brain-field>${["other","presence","climate","energy","lighting","hot_water","ventilation"].map(v=>`<option value="${v}">${this.categoryLabel(v)}</option>`).join("")}</select></label>
@@ -1032,6 +1062,14 @@ class EsterPanel extends HTMLElement {
       ${Object.entries(this._brain?.preferences||{}).map(([k,v])=>`<p>${this.esc(k)}: ${this.esc(String(v))}</p>`).join("")}
       ${(this._brain?.records||[]).filter(r=>r.used_in_latest?.length).map(r=>`<p>${this.esc(r.statement)} · considerata in ${r.used_in_latest.length} proposte recenti.</p>`).join("")||"<p>Nessun uso nelle proposte recenti verificato.</p>"}
       </details><details class="control"><summary>PREVISIONI E MODELLI LOCALI</summary>${this.forecastCard()}<section class="grid">${this.learningCards()}</section></details>`;
+  }
+
+  operationalMemoryView() {
+    const records=(this._brain?.records||[]).filter(r=>r.memory_status==="active");
+    const parents=new Set(records.map(r=>r.derived_from).filter(Boolean));
+    const gaps=records.filter(r=>r.clarifications?.length && !r.clarifications_resolved && !parents.has(r.knowledge_id));
+    return `<details class="control"><summary>INSEGNAMENTI DA COMPLETARE · ${gaps.length}</summary>${gaps.map(r=>`<article class="control"><p>${this.esc(r.statement)}</p>${this.teachingMeaning(r)}<button data-teaching-complete="${this.esc(r.knowledge_id)}">COMPLETA O CORREGGI IL RACCONTO</button></article>`).join("")||"<p>Nessun chiarimento richiesto dall'interpretazione locale.</p>"}</details>
+      <details class="control"><summary>VALORI E ABITUDINI INTERPRETATI</summary>${records.filter(r=>r.effect||r.routine).map(r=>`<article class="control"><p>${this.esc(r.statement)}</p>${this.teachingMeaning(r)}${r.source!=="brain_note"?`<button data-retract-interpretation="${this.esc(r.knowledge_id)}">RITIRA QUESTA INTERPRETAZIONE</button>`:""}</article>`).join("")||"<p>Carica un racconto o analizza le fonti già conservate, poi verifica le interpretazioni proposte.</p>"}</details>`;
   }
 
   teachView(compact = false) {
@@ -1063,9 +1101,10 @@ class EsterPanel extends HTMLElement {
         ${this.fileCollectionView()}
         <div class="command-head"><span>VOCE / TESTO</span><b>RACCONTA A E.S.T.E.R.</b></div>
         <p>Non devi usare parole precise. Puoi parlare di più cose insieme: luci, clima, orari, persone, eccezioni e priorità.</p>
-        <div class="command-input"><textarea id="teach" placeholder="Per esempio: «La sera in salotto vogliamo circa 21 gradi. Se non c'è nessuno non serve scaldarlo. Le luci esterne servono quando rientriamo col buio…»"></textarea><button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button><button id="teach-send">${this._busy?"...":"CAPIRE"}</button></div>
+        ${this._teachingParent?`<p>Stai completando una fonte già conservata. La nuova interpretazione resterà collegata a quella fonte.</p><button id="teach-independent">NUOVO RACCONTO INDIPENDENTE</button>`:""}
+        <div class="command-input"><textarea id="teach" placeholder="Per esempio: «In studio preferisco 21 gradi; in studio lavoro dalle 9 alle 18 nei feriali»"></textarea><button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button><button id="teach-send">${this._busy?"...":"CAPIRE"}</button></div>
       </section>
-      ${proposal?.source === "knowledge_files" ? `<article class="control teach-review"><h3>File ricevuto e verificato</h3><p>${(proposal.items || []).length} nuove informazioni pronte per il salvataggio.</p><button id="teach-confirm">SALVA NELLA MEMORIA</button><button id="teach-discard">ANNULLA SALVATAGGIO</button><p>Dopo la conferma le note entrano nella memoria attiva.</p>${(proposal.items||[]).filter(x=>x.effect).map(x=>`<p>Valore operativo: ${this.esc(x.effect.type)} = ${this.esc(String(x.effect.value))} · ${this.esc(x.area_id||"casa")} · ${this.esc(x.effect.season||"sempre")}</p>`).join("")}</article>` : proposal ? `<h2 class="section-title">QUELLO CHE HO CAPITO</h2><article class="control teach-review"><p>${this.esc(proposal.summary||"Controlla questi punti.")}</p><div class="knowledge-list">${(proposal.items||[]).map(x=>`<div class="knowledge-row"><b>${this.esc(labels[x.domain]||this.categoryLabel(x.domain))}</b><span>${this.esc(x.statement)}</span><small>${this.esc((x.kind||"informazione").replaceAll("_"," "))} · ${this.pct(x.confidence)}</small></div>`).join("")||'<div class="empty">Non ho estratto informazioni affidabili.</div>'}</div><div class="button-row"><button id="teach-confirm">CONFERMA E RICORDA</button><button id="teach-discard">SCARTA</button></div><p class="hint">Finché non confermi, queste informazioni non diventano conoscenze attive. I file caricati restano conservati nella raccolta.</p></article>` : ""}
+      ${proposal?.source === "knowledge_files" ? `<article class="control teach-review"><h3>File ricevuto e verificato</h3><p>${(proposal.items || []).length} nuove informazioni pronte per il salvataggio.</p><button id="teach-confirm">SALVA NELLA MEMORIA</button><button id="teach-discard">ANNULLA SALVATAGGIO</button><p>Dopo la conferma le note entrano nella memoria attiva.</p>${(proposal.items||[]).map(x=>this.teachingMeaning(x)).join("")}</article>` : proposal ? `<h2 class="section-title">QUELLO CHE HO CAPITO</h2><article class="control teach-review"><p>${this.esc(proposal.summary||"Controlla questi punti.")}</p>${(proposal.clarifications||[]).map(c=>`<p>${this.esc(c.statement)}<br>${c.questions.map(q=>this.esc(q)).join("; ")}</p>`).join("")}<div class="knowledge-list">${(proposal.items||[]).map(x=>`<div class="knowledge-row"><b>${this.esc(labels[x.domain]||this.categoryLabel(x.domain))}</b><span>${this.esc(x.statement)}</span><small>${this.esc((x.kind||"informazione").replaceAll("_"," "))} · ${this.pct(x.confidence)}</small>${this.teachingMeaning(x)}</div>`).join("")||'<div class="empty">Non ho estratto informazioni affidabili.</div>'}</div><div class="button-row"><button id="teach-confirm" ${!proposal.proposal_id?"disabled":""}>CONFERMA E RICORDA</button><button id="teach-discard">SCARTA</button></div><p class="hint">Finché non confermi, queste informazioni non diventano conoscenze attive. I file caricati restano conservati nella raccolta.</p></article>` : ""}
       <h2 class="section-title">COSA MI HAI INSEGNATO</h2>
       ${knowledge.length ? `<section class="grid">${domains.filter(d=>grouped[d]?.length).map(d=>{const items=grouped[d];const cv=coverage[d]||{};return `<article class="control knowledge-domain"><div class="eyebrow">${labels[d]}</div><h3>${items.length} informazioni</h3><p>${this.esc(cv.meaning|| "Ecco le informazioni conservate.")}</p>${items.slice(-5).map(x=>`<div class="knowledge-mini">${this.esc(x.statement||x.text||"")}</div>`).join("")}</article>`}).join("")}</section>` : '<article class="control"><h3>Cominciamo con una cosa semplice</h3><p>Raccontami come usate una stanza, oppure carica un file. Ti mostrerò quello che ho capito prima di salvarlo.</p></article>'}
       <h2 class="section-title">COSA MI MANCA</h2>
@@ -1213,6 +1252,26 @@ class EsterPanel extends HTMLElement {
     });
     const modeToggle = this.shadowRoot?.querySelector("#mode-toggle");
     const brainRefresh=this.shadowRoot?.querySelector("#brain-refresh");
+    const understand=this.shadowRoot?.querySelector("#brain-understand");
+    const independent=this.shadowRoot?.querySelector("#teach-independent");
+    if(independent)independent.onclick=()=>{this._teachingParent=null;this._notice="Nuovo racconto indipendente dalla fonte precedente.";this.render();const field=this.shadowRoot.querySelector("#teach");if(field){field.closest("details").open=true;field.focus();}};
+    if(understand)understand.onclick=()=>this.understandMemory();
+    this.shadowRoot?.querySelectorAll("[data-teaching-complete]").forEach(button=>button.onclick=()=>{
+      const row=this._brain?.records.find(r=>r.knowledge_id===button.dataset.teachingComplete);
+      if(!row)return;
+      this._teachingParent=row.knowledge_id;
+      this._notice="Completa stanza, orari e giorni nel racconto, poi premi CAPIRE e verifica la nuova interpretazione.";
+      this.render();
+      const field=this.shadowRoot.querySelector("#teach");
+      if(field){field.closest("details").open=true;field.value=row.statement;field.scrollIntoView({block:"center"});field.focus();}
+      this._notice="Completa stanza, orari e giorni nel racconto, poi premi CAPIRE e verifica la nuova interpretazione.";
+    });
+    this.shadowRoot?.querySelectorAll("[data-retract-interpretation]").forEach(button=>button.onclick=async()=>{
+      if(this._busy)return;this._busy=true;
+      try{await this._hass.callService("ester","retract_interpretation",{knowledge_id:button.dataset.retractInterpretation});await this.loadBrain();this._notice="Interpretazione ritirata dalle valutazioni; fonte e storico conservati.";}
+      catch(error){this._notice="Ritiro non confermato: "+error.message;}
+      finally{this._busy=false;this.render();}
+    });
     this.shadowRoot?.querySelectorAll("[data-decision-feedback]").forEach(button=>button.onclick=()=>this.decisionFeedback(button.dataset.decisionFeedback,button.dataset.rating));
     if(brainRefresh) brainRefresh.onclick=()=>this.loadBrain();
     const brainSave=this.shadowRoot?.querySelector("#brain-note-save");
@@ -1513,7 +1572,7 @@ class EsterPanel extends HTMLElement {
 
     let body = "";
     if (this._tab === "brain") {
-      body=this.brainView()+this.brainExperiencesView();
+      body=this.brainView()+this.operationalMemoryView()+this.brainExperiencesView();
     } else if (this._tab === "overview") {
       body = `
         <section class="jarvis-stage">
@@ -1613,7 +1672,7 @@ class EsterPanel extends HTMLElement {
         .hud-gauge{position:relative;width:120px;height:120px;border-radius:50%;background:conic-gradient(#56eaff calc(var(--pct)*1%),#0b2a33 0);padding:3px;box-shadow:0 0 20px #00dfff22}.hud-gauge:after{content:"";position:absolute;inset:7px;border-radius:50%;background:#031016}.gauge-face{position:absolute;inset:0;z-index:2;display:grid;place-items:center;align-content:center}.gauge-face b{font:300 25px monospace;color:#e3feff}.gauge-face span{font:7px monospace;letter-spacing:.15em;color:#5eabb7}.hud-gauge small{position:absolute;top:100%;left:0;right:0;text-align:center;color:#659ba5}
         .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}.stats>div,.metrics>div{padding:18px;border:1px solid #16d8ff35;background:#06151d9e;border-radius:10px}.stats b,.metrics b{display:block;font-size:28px;color:#d9fbff}.stats span,.metrics span{font-size:10px;letter-spacing:.14em;color:#55bdd0}
         .teach,.control,.health{border:1px solid #1eddfc40;background:#041219c8;border-radius:12px;padding:15px}.teach-row,.answer-row,.button-row{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
-        textarea,input,select{width:100%;border:1px solid #25dffc44;background:#02090e;color:#dcfbff;border-radius:8px;padding:11px}.teach textarea,.control textarea{min-height:85px;resize:vertical}
+        textarea,input,select{width:100%;border:1px solid #25dffc44;background:#02090e;color:#dcfbff;border-radius:8px;padding:11px}select{appearance:none;color-scheme:dark;background-color:#02090e}.teach textarea,.control textarea{min-height:85px;resize:vertical}
         .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}.decision,.question,.migration,.model,.energy-core{position:relative;border:0;border-top:1px solid #63eaff42;border-bottom:1px solid #63eaff1f;background:linear-gradient(90deg,transparent,#05161dbd 7%,#05161dbd 93%,transparent);clip-path:polygon(0 10px,10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%);padding:18px 20px;box-shadow:none}.decision:before,.question:before,.migration:before,.model:before{content:"";position:absolute;left:14px;top:0;width:70px;height:1px;background:#74efff;box-shadow:0 0 8px #26e7ff}
         .decision-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.confidence-block{text-align:right;font-family:monospace}.confidence-block span{display:block;font-size:8px;letter-spacing:.18em;color:#4eaabb}.confidence-block b{font-size:28px;font-weight:400;color:#c9fbff;text-shadow:0 0 12px #4eeaff55}.decision-section{margin:14px 0;padding-left:13px;border-left:1px solid #45e9ff55}.decision-section span{display:block;font-size:9px;letter-spacing:.17em;color:#4cb4c4;margin-bottom:5px}.decision-section strong{font-size:17px;font-weight:400;color:#dcfbff}.decision-section p{margin:0;color:#91c0c8;line-height:1.45}.decision-explainer{margin-bottom:14px}.decision h3,.question h3,.migration h3,.model h3{margin:5px 0 10px;color:#e9fdff}.confidence{font-family:monospace;font-size:25px;color:#68efff}.meter{height:3px;background:#0e2a34;margin:8px 0 14px}.meter span{display:block;height:100%;background:#53edff;box-shadow:0 0 10px #2ae8ff}.decision p,.question p,.energy-core p,.control p,.health p{color:#9dc5cf;line-height:1.5}.proposal{padding:10px 12px;background:#06222c;border-left:2px solid #50e9ff;color:#c8f8ff;margin-top:12px}.meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:#4fa3b3;font-family:monospace;font-size:10px;margin-top:13px}
         .answer-row input{flex:1;min-width:180px}.mic-btn{border-radius:999px;border-color:#69f2ff;box-shadow:0 0 14px #00d9ff44;background:radial-gradient(circle,#0b3444,#041018)}.big-mic{min-width:112px}.quick-row{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.quick{padding:7px 10px;font-size:11px}.question-focus{display:grid;grid-template-columns:120px 1fr;gap:18px;align-items:start}.question-radar{position:relative;width:108px;height:108px;border-radius:50%;border:1px solid #69efff99;display:grid;place-items:center;background:radial-gradient(circle,#0bdcff24 0,#031018 58%,transparent 59%);box-shadow:0 0 25px #00dcff22,inset 0 0 25px #00dcff18}.radar-ring{position:absolute;border:1px solid #43e8ff66;border-radius:50%}.rr1{inset:12%;border-style:dashed;animation:spin 9s linear infinite}.rr2{inset:28%;animation:spin 5s linear reverse infinite}.radar-value{font:700 20px monospace;color:#c9fbff;text-shadow:0 0 12px #56eaff}.question-block{margin:10px 0;padding:9px 12px;border-left:2px solid #28dff2;background:linear-gradient(90deg,#09202a88,transparent)}.question-block span{display:block;font-size:9px;letter-spacing:.18em;color:#49c6dc}.question-block p{margin:5px 0}.question-block.ask{border-left-color:#fff}.question-block.why{border-left-color:#6ff7d0}.hint{font-size:12px;color:#7db5c0;font-style:italic;margin:8px 0}.energy-core{display:flex;align-items:center;gap:35px}.orb{width:150px;height:150px;border-radius:50%;border:1px solid #4dedff;display:grid;place-items:center;box-shadow:0 0 30px #00d9ff45,inset 0 0 35px #00d9ff25;flex:0 0 auto}.orb-core{width:48px;height:48px;border-radius:50%;background:#c9fbff;box-shadow:0 0 50px #16e5ff}.energy-data{flex:1}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metrics.compact b{font-size:19px}.status{font-family:monospace;color:#6ff6cb}.model pre{white-space:pre-wrap;max-height:310px;overflow:auto;color:#7eb9c5;font-size:11px}.empty{padding:30px;color:#6c9da8;border:1px dashed #1bd5ef35;border-radius:10px}
@@ -1747,6 +1806,7 @@ class EsterPanel extends HTMLElement {
       </div>
     `;
     this.bind();
+    if(this._tab==="brain" && this._teachDraft){const review=this.shadowRoot.querySelector(".teach-review");if(review?.closest("details"))review.closest("details").open=true;}
     answerDrafts.forEach(([id,value])=>{const field=this.shadowRoot.getElementById(id);if(field)field.value=value;});
     this.shadowRoot.querySelectorAll("[data-brain-field]").forEach(field=>{if(this._brainForm?.[field.id] !== undefined)field.value=this._brainForm[field.id];});
     const teachField = this.shadowRoot.querySelector("#teach");

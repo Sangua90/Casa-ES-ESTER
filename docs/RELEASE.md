@@ -1,3 +1,15 @@
+## E.S.T.E.R. 1.7.0 — Insegnamenti operativi e confronto delle alternative
+
+- Testo libero e file possono proporre valori espliciti di comfort/costo energia e abitudini con stanza, orari e giorni. L'anteprima mostra il significato operativo; diventa attivo dopo conferma.
+- Nel Cervello puoi analizzare le informazioni già conservate, completare gli insegnamenti insufficienti e ritirare un'interpretazione. Fonte, file e storico restano conservati. Le informazioni derivate rispettano validità e ritiro delle proprie fonti.
+- Le decisioni climatiche confrontano attesa, intervento immediato e anticipato, mostrando temperatura prevista, energia, costo, ipotesi e dati mancanti. Il modello non considera raggiunto un target impossibile nella finestra disponibile.
+- Comfort delle abitudini, provenienza e conflitti entrano nelle valutazioni correnti, replay e scenari. La fiducia di una scelta modellata viene limitata dalla solidità del modello termico.
+- Ricerca diretta degli orari futuri senza scansione minuto per minuto. Interfaccia verificata su WebKit con configurazione iPhone e servizi reali Home Assistant di test, incluso salvataggio e rilettura della memoria.
+
+Il parser locale interpreta soltanto forme esplicite supportate; condizioni e dati mancanti restano da chiarire. Il confronto termico è una stima locale lineare, non un ottimizzatore generale della casa. L'eventuale surplus FV attuale è un'ipotesi condizionata, non una previsione meteo. Nessuna percentuale di intelligenza o risparmio reale inventata.
+
+Shadow Mode invariato: nessuna attuazione fisica. Aggiorna da HACS, riavvia Home Assistant e ricarica il pannello. Per la memoria precedente usa **Cervello → File e insegnamenti → Analizza le informazioni già conservate**, verifica e conferma le interpretazioni. [Dettagli e limiti](CERVELLO.md).
+
 ## E.S.T.E.R. 1.6.0 — Cervello, memoria condivisa ed esperienze
 
 - CERVELLO è la pagina iniziale: domande, file, insegnamenti, note aggiornabili, memoria conservata e previsioni nello stesso punto. Il menu principale contiene Cervello, Decisioni e CORE; le sezioni specialistiche sono nei dettagli.

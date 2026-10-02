@@ -27,7 +27,8 @@ from .const import VERSION
 from .language_pipeline import interpret_and_store
 from .language import store_teaching_items
 from .knowledge_files import prepare_documents, append_documents
-from .brain import working_memory, validate_effect
+from .brain import working_memory, validate_effect, validity
+from .teaching import compile_item
 from .experiences import remember
 from .language import KNOWLEDGE_DOMAINS
 from .snapshots import create_snapshot, restore_snapshot, portable_memory
@@ -283,9 +284,53 @@ def register_services(hass):
     async def interpret_message(call):
         coordinator = runtime()
         try:
-            return await interpret_and_store(hass, coordinator, call.data["message"], preview=True)
+            return await interpret_and_store(hass, coordinator, call.data["message"], preview=True, source_knowledge_id=call.data.get("source_knowledge_id"))
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from None
         except Exception:
             raise HomeAssistantError("Natural-language interpretation failed; no memory was changed") from None
+
+    async def preview_memory_understanding(call):
+        coordinator = runtime()
+        now = dt_util.utcnow()
+        rooms = (getattr(coordinator, "data", None) or {}).get("rooms", {})
+        if not rooms:
+            from homeassistant.helpers import area_registry
+            rooms = {r.id:{"name":r.name} for r in area_registry.async_get(hass).async_list_areas()}
+        async with coordinator.storage.lock:
+            knowledge = coordinator.storage.data.get("knowledge", [])
+            compiled = {r.get("derived_from") for r in knowledge}
+            items, clarifications = [], []
+            for row in knowledge:
+                if validity(row, now)!="active" or row.get("effect") or row.get("routine") or row.get("knowledge_id") in compiled:
+                    continue
+                origin = dt_util.parse_datetime(row.get("created_at") or "") or now
+                if origin.tzinfo is None:
+                    origin = now
+                item = compile_item({"statement":row.get("statement") or row.get("text", ""),
+                                     "domain":row.get("domain") or row.get("category") or "other", "kind":row.get("kind", "fact"),
+                                     "area_id":row.get("area_id") or "", "confidence":.7,
+                                     **{k:row[k] for k in ("starts_at", "expires_at", "condition") if row.get(k)}}, rooms, origin, ZoneInfo(hass.config.time_zone))
+                if validity(item, now)=="expired":
+                    if len(clarifications)<30:
+                        clarifications.append({"statement":item["statement"], "questions":["Il riferimento temporale della fonte è passato: aggiorna l'informazione prima di applicarla."]})
+                elif item.get("effect") or item.get("routine"):
+                    items.append({**item, "derived_from":row["knowledge_id"],
+                                  **({k:row[k] for k in ("source_file", "source_digest") if row.get(k)})})
+                elif item.get("clarifications") and len(clarifications)<30:
+                    clarifications.append({"statement":item["statement"], "questions":item["clarifications"]})
+                if len(items)==30:
+                    break
+            proposal={"proposal_id":str(uuid4()),"created_at":now.isoformat(),"source":"memory_understanding","provider":"local",
+                      "items":items,"clarifications":clarifications,
+                      "summary":f"{len(items)} interpretazioni operative da verificare. Le fonti originali restano conservate."}
+            if items:
+                pending=coordinator.storage.data.setdefault("pending_teachings", [])
+                pending.append(proposal); del pending[:-20]
+                await coordinator.storage.async_save()
+            else:
+                proposal["proposal_id"] = None
+        return {**proposal,"memory_changed":False,"device_action":False}
 
     async def preview_knowledge_files(call):
         coordinator = runtime()
@@ -311,7 +356,7 @@ def register_services(hass):
             for row in frame["records"]:
                 row["used_in_latest"] = [d["decision_id"] for d in frame["latest"]
                     if any(k.get("knowledge_id") == row.get("knowledge_id") for k in
-                           (d.get("evidence", {}).get("knowledge_context", []) + d.get("evidence", {}).get("brain_preferences", [])))]
+                           (d.get("evidence", {}).get("knowledge_context", []) + d.get("evidence", {}).get("brain_preferences", []) + d.get("evidence", {}).get("brain_routines", [])))]
             frame["shadow_mode"] = True
             frame["device_action"] = False
             cases = coordinator.storage.data.get("brain_experiences", [])
@@ -383,6 +428,21 @@ def register_services(hass):
                 await coordinator.storage.async_save()
             except Exception:
                 note.clear(); note.update(previous)
+                raise
+        await coordinator.async_request_refresh()
+
+    async def retract_interpretation(call):
+        coordinator = runtime()
+        async with coordinator.storage.lock:
+            row = next((r for r in coordinator.storage.data.get("knowledge", []) if r.get("knowledge_id")==call.data["knowledge_id"]), None)
+            if row is None or not (row.get("effect") or row.get("routine")):
+                raise ServiceValidationError("Interpretazione operativa non trovata.")
+            previous = deepcopy(row)
+            row.update(status="retracted", updated_at=dt_util.utcnow().isoformat())
+            try:
+                await coordinator.storage.async_save()
+            except Exception:
+                row.clear(); row.update(previous)
                 raise
         await coordinator.async_request_refresh()
 
@@ -629,6 +689,8 @@ def register_services(hass):
         "classify_entity": (classify, {vol.Required("entity_id"): cv.entity_id,
             vol.Required("role"): vol.In(ROLES), vol.Optional("area_id"): SHORT}),
         "get_brain": (get_brain, {}),
+        "preview_memory_understanding": (preview_memory_understanding, {}),
+        "retract_interpretation": (retract_interpretation, {vol.Required("knowledge_id"): SHORT}),
         "save_brain_note": (save_brain_note, {vol.Required("statement"): TEXT,
             vol.Optional("domain", default="other"): vol.In(KNOWLEDGE_DOMAINS), vol.Optional("area_id", default=""): cv.string,
             vol.Optional("expires_at"): cv.string, vol.Optional("replaces_id"): SHORT,
@@ -653,7 +715,8 @@ def register_services(hass):
         "import_question_file": (import_question_file, {vol.Required("file_json"): vol.All(cv.string, vol.Length(min=2, max=1000000)), vol.Optional("confirm", default=False): cv.boolean}),
         "select_voice_question": (select_voice_question, {vol.Required("question_id"): SHORT}),
         "dismiss_question": (dismiss_question, {vol.Required("question_id"): SHORT}),
-        "interpret_message": (interpret_message, {vol.Required("message"): TEACH_TEXT, vol.Optional("preview", default=True): cv.boolean}),
+        "interpret_message": (interpret_message, {vol.Required("message"): TEACH_TEXT, vol.Optional("preview", default=True): cv.boolean,
+                                                  vol.Optional("source_knowledge_id"): SHORT}),
         "confirm_teaching": (confirm_teaching, {vol.Required("proposal_id"): SHORT}),
         "discard_teaching": (discard_teaching, {vol.Required("proposal_id"): SHORT}),
         "export_memory": (export_memory, {}),
@@ -702,4 +765,4 @@ def register_services(hass):
     }
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
-            supports_response=SupportsResponse.ONLY if name in {"get_brain", "save_brain_note", "export_learning_report", "export_question_file", "import_question_file", "get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "preview_knowledge_files", "confirm_teaching", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)
+            supports_response=SupportsResponse.ONLY if name in {"preview_memory_understanding", "get_brain", "save_brain_note", "export_learning_report", "export_question_file", "import_question_file", "get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "preview_knowledge_files", "confirm_teaching", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)

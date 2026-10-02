@@ -5,6 +5,7 @@ E.S.T.E.R. osserva Home Assistant, costruisce un modello delle stanze e registra
 
 ## Cosa fa
 - Riunisce domande, file, note a scadenza, esperienze e previsioni nella pagina iniziale **CERVELLO**, con memoria condivisa nelle valutazioni. [Funzionamento e limiti del nucleo](docs/CERVELLO.md).
+- Interpreta valori espliciti di comfort/costo energia e abitudini con stanza, orari e giorni; mostra l'anteprima prima della conferma. Puoi analizzare le vecchie fonti e completare quelle insufficienti. Le proposte climatiche confrontano attesa, intervento immediato e anticipato con dati e incertezze visibili.
 - Scopre entità, aree e dispositivi; permette correzioni locali della classificazione.
 - Legge 24 ore di storico Recorder e 7 giorni di statistiche orarie quando disponibili, senza modificare il database.
 - Apprende trend e modelli locali: risposta termica delle stanze, efficacia ventilazione, comportamento ACS e probabilità d'uso degli spazi.

@@ -26,7 +26,7 @@ def validate_interpretation(data: dict) -> dict:
     return result
 
 
-def validate_teaching(data: dict, original_text: str) -> dict:
+def validate_teaching(data: dict, original_text: str, allowed_areas=None) -> dict:
     """Normalize multi-item AI teaching output. It never contains executable actions."""
     if not isinstance(data,dict): data={}
     raw=data.get("items") if isinstance(data.get("items"),list) else []
@@ -42,6 +42,28 @@ def validate_teaching(data: dict, original_text: str) -> dict:
         item={"domain":domain,"kind":kind,"statement":statement,"confidence":confidence}
         for key in ("area_id","subject","condition","time_window","priority","supersedes_hint"):
             if entry.get(key) is not None: item[key]=str(entry[key])[:300]
+        from .teaching import validate_routine
+        from .brain import validate_effect
+        area = item.get("area_id", "")
+        if allowed_areas is not None and area and area not in allowed_areas:
+            raise ValueError("L'interpretazione cita una stanza non presente in Home Assistant.")
+        if entry.get("effect"):
+            item["effect"] = validate_effect(entry["effect"], area)
+        if entry.get("routine"):
+            item["routine"] = validate_routine(entry["routine"], area)
+        for field in ("starts_at", "expires_at"):
+            if entry.get(field):
+                stamp = datetime.fromisoformat(entry[field])
+                if stamp.tzinfo is None:
+                    raise ValueError("La validità dell'informazione deve includere il fuso orario.")
+                item[field] = stamp.isoformat()
+        if entry.get("derived_from"):
+            item["derived_from"] = str(entry["derived_from"])[:100]
+        if entry.get("clarifications"):
+            item["clarifications"] = [str(s)[:500] for s in entry["clarifications"][:10]]
+        if entry.get("condition") and (item.get("effect") or item.get("routine")):
+            item.pop("effect", None); item.pop("routine", None)
+            item.setdefault("clarifications", []).append("La condizione deve essere chiarita prima di applicare un valore o un'abitudine senza condizioni.")
         items.append(item)
     return {"summary":str(data.get("summary") or ("Ho separato quello che mi hai raccontato in %d informazioni."%len(items)))[:1000],
             "items":items,"original_text":original_text[:2000]}
@@ -52,8 +74,13 @@ def store_teaching_items(store: dict, teaching: dict, now: datetime) -> list[dic
     saved=[]
     knowledge=store.setdefault("knowledge",[])
     for item in teaching.get("items",[]):
+        if item.get("derived_from"):
+            from .brain import validity
+            parent = next((r for r in knowledge if r.get("knowledge_id") == item["derived_from"]), None)
+            if parent is None or validity(parent, now) not in {"active", "scheduled"}:
+                raise ValueError("La fonte è stata modificata o non è più attiva: analizza di nuovo la memoria.")
         row={**item,"knowledge_id":str(uuid4()),"created_at":now.isoformat(),"updated_at":now.isoformat(),
-             "source":"natural_language_confirmed","scope":"persistent","status":"active"}
+             "source":"natural_language_confirmed","scope":"temporary" if item.get("expires_at") else "persistent","status":"active"}
         hint=(item.get("supersedes_hint") or "").strip().lower()
         if hint:
             for old in knowledge:

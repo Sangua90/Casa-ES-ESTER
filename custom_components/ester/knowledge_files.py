@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from .language import KNOWLEDGE_DOMAINS, KNOWLEDGE_KINDS
 from .brain import validate_effect
+from .teaching import validate_routine, compile_item
 
 
 def document_collection(store: dict) -> dict:
@@ -39,6 +40,13 @@ def document_collection(store: dict) -> dict:
 async def prepare_documents(coordinator, documents: list) -> dict:
     """Persist a validated batch and its proposal, without modifying active knowledge."""
     items = parse_documents(documents)
+    from zoneinfo import ZoneInfo
+    hass = coordinator.storage._hass
+    rooms = (getattr(coordinator, "data", None) or {}).get("rooms", {})
+    if not rooms:
+        from homeassistant.helpers import area_registry
+        rooms = {r.id:{"name":r.name} for r in area_registry.async_get(hass).async_list_areas()}
+    items = [compile_item(item, rooms, datetime.now(UTC), ZoneInfo(hass.config.time_zone)) for item in items]
     async with coordinator.storage.lock:
         new = additions(coordinator.storage.data.get("knowledge", []), items)
         proposal = {"proposal_id": str(uuid4()), "created_at": datetime.now(UTC).isoformat(),
@@ -72,7 +80,8 @@ async def prepare_documents(coordinator, documents: list) -> dict:
 
 def identity(item: dict) -> tuple:
     return (item.get("domain", "other"), item.get("area_id", ""),
-            " ".join((item.get("statement") or item.get("text") or "").casefold().split()), json.dumps(item.get("effect", {}), sort_keys=True))
+            " ".join((item.get("statement") or item.get("text") or "").casefold().split()), json.dumps(item.get("effect", {}), sort_keys=True),
+            json.dumps(item.get("routine", {}), sort_keys=True), item.get("starts_at"), item.get("expires_at"))
 
 
 def parse_documents(files: list) -> list[dict]:
@@ -108,8 +117,8 @@ def parse_documents(files: list) -> list[dict]:
             raise ValueError("Il file non contiene informazioni.")
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
         for row in rows:
-            if not isinstance(row, dict) or set(row) - {"statement", "domain", "kind", "area_id", "effect"}:
-                raise ValueError("Ogni informazione può contenere solo statement, domain, kind e area_id.")
+            if not isinstance(row, dict) or set(row) - {"statement", "domain", "kind", "area_id", "effect", "routine"}:
+                raise ValueError("Ogni informazione può contenere statement, domain, kind, area_id e, in JSON v2, effect e routine.")
             statement = row.get("statement")
             if not isinstance(statement, str) or not 1 <= len(statement.strip()) <= 1000:
                 raise ValueError("Dividi il testo in paragrafi da 1 a 1000 caratteri.")
@@ -126,6 +135,10 @@ def parse_documents(files: list) -> list[dict]:
                 if suffix != "json" or document["format"] != "ester-knowledge-v2":
                     raise ValueError("Gli effetti strutturati richiedono ester-knowledge-v2.")
                 items[-1]["effect"] = validate_effect(row["effect"], area)
+            if "routine" in row:
+                if suffix != "json" or document["format"] != "ester-knowledge-v2":
+                    raise ValueError("Le abitudini strutturate richiedono ester-knowledge-v2.")
+                items[-1]["routine"] = validate_routine(row["routine"], area)
             if len(items) > 100:
                 raise ValueError("Carica al massimo 100 informazioni alla volta.")
     return items
@@ -149,7 +162,7 @@ def append_documents(store: dict, proposal: dict, now) -> list[dict]:
     rows = additions(store.get("knowledge", []), proposal["items"])
     saved = [{**row, "knowledge_id": str(uuid4()), "source": "knowledge_file_confirmed",
               "created_at": now.isoformat(), "updated_at": now.isoformat(),
-              "status": "active", "scope": "persistent"} for row in rows]
+              "status": "active", "scope": "temporary" if row.get("expires_at") else "persistent"} for row in rows]
     store.setdefault("knowledge", []).extend(saved)
     documents = store.setdefault("knowledge_documents", [])
     digests = {row["source_digest"] for row in saved}
