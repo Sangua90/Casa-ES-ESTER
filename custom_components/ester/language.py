@@ -75,7 +75,7 @@ def knowledge_overview(store: dict) -> tuple[dict,list[dict]]:
         "security":"come deve comportarsi la sicurezza","appliances":"come usate gli apparecchi",
         "rooms":"come vengono usate le stanze","other":"altre abitudini della casa"}
     for domain in KNOWLEDGE_DOMAINS:
-        n=sum(1 for k in active if k.get("domain")==domain)
+        n=sum(1 for k in active if (k.get("domain") or k.get("category"))==domain)
         coverage[domain]={"count":n,"meaning":("Ho già %d informazioni su %s."%(n,labels[domain])) if n else "Mi manca ancora capire "+labels[domain]+"."}
     gaps=[]
     for domain in ("presence","climate","lighting","hot_water","energy","ventilation","security"):

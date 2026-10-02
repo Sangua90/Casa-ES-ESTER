@@ -29,6 +29,8 @@ class EsterPanel extends HTMLElement {
 
   refreshDataOnly() {
     // Preserve scroll position and unsent answers during background updates.
+    const progress = this.shadowRoot?.querySelector("#ester-progress");
+    if (progress) progress.innerHTML = this.progressView();
     if (this._tab === "overview") this.startNeuralCore();
     if (this._tab === "teach" && !this._fileCollection && !this._loadingCollection && !this._collectionError) this.loadFileCollection();
   }
@@ -45,7 +47,10 @@ class EsterPanel extends HTMLElement {
     const technical = ["da completare","associare almeno","configurazione","dati mancanti","contatori energetici","raccolta dati"];
     return !technical.some(x => title.includes(x) || action.includes(x));
   }
-  realDecisions() { return this.history().filter(d => this.isTrueDecision(d)); }
+  realDecisions() {
+    const current = this.state("sensor.e_s_t_e_r_shadow_decisions")?.attributes?.latest;
+    return (Array.isArray(current) ? current : this.history()).filter(d => this.isTrueDecision(d));
+  }
   roomName(area) { return this.summary().rooms?.[area]?.name || (area ? String(area).replaceAll("_", " ") : "Casa / stanza non indicata"); }
   currentDecisions(items) {
     const groups = new Map();
@@ -474,6 +479,7 @@ class EsterPanel extends HTMLElement {
         </div>
         <div class="decision-section primary"><span>LA MIA PROPOSTA</span><strong>${this.esc(d.proposed_action)}</strong></div>
         <details class="decision-reason"><summary>Perché questa proposta?</summary><p>${this.esc(d.reasoning)}</p></details>
+        ${(d.evidence?.knowledge_context || []).length ? '<details><summary>Memoria considerata</summary>'+d.evidence.knowledge_context.map(k=>'<p>'+this.esc(k.statement)+'<br><small>'+this.esc(k.application === "constraint_applied" ? "Vincolo applicato: proposta sospesa" : "Solo contesto: nessuna regola automatica ricavata")+'</small></p>').join("")+'</details>' : ''}
         <div class="plain-explain">${this.esc(this.confidenceMeaning(d.confidence))}</div>
         ${d.evidence?.question ? '<button data-open-tab="questions">RISPONDI ALLE DOMANDE</button>' : ''}
         ${this._advanced ? `
@@ -487,6 +493,26 @@ class EsterPanel extends HTMLElement {
           </details>` : ''}
       </article>`;
     }).join("");
+  }
+
+  progressView() {
+    const p = this.summary().progress;
+    if (!p) return '<article class="control"><h3>Preparazione di E.S.T.E.R.</h3><p>In attesa della prima valutazione. Efficienza reale non misurabile in Shadow Mode.</p></article>';
+    const value = Math.max(0,Math.min(100,Number(p.verified_percent)||0));
+    return `<article class="control"><h3>Preparazione di E.S.T.E.R.</h3><p><b>${value}% dei requisiti verificati</b> · ${this.esc(p.verified)}/${this.esc(p.total)}</p><progress aria-label="Requisiti verificati" max="100" value="${value}" style="width:100%;height:20px;accent-color:#74e9ef"></progress><p>${this.esc(p.note)}</p><details><summary>Cosa manca e cosa è già verificato</summary>${(p.checks||[]).map(c=>'<p>'+ (c.verified?'✓ ':'○ ')+this.esc(c.label)+'</p>').join("")}</details><p><b>Efficienza reale: non ancora misurabile</b><br>${this.esc(p.efficiency_reason)}</p><p>Qualità delle proposte secondo i tuoi feedback: ${p.feedback_quality_percent == null ? "nessun dato" : this.esc(p.feedback_quality_percent)+"%"} (${this.esc(p.feedback_samples)} valutazioni). Non è un risparmio energetico misurato.</p></article>`;
+  }
+
+  async exportLearningReport() {
+    if (this._busy) return;
+    this._busy = true;
+    try {
+      const result = await this._hass.callWS({type:"call_service", domain:"ester", service:"export_learning_report", service_data:{}, return_response:true});
+      const url = URL.createObjectURL(new Blob([JSON.stringify(result?.response || result,null,2)], {type:"application/json"}));
+      const link = document.createElement("a"); link.href=url; link.download="ester-rapporto-apprendimento.json"; link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+      this._notice = "Rapporto scaricato: include memoria, dati della casa e risultati Shadow. Puoi caricarlo qui per una valutazione; non abilita i dispositivi.";
+    } catch (err) { this._notice = "Rapporto non scaricato: " + (err?.message || "errore"); }
+    finally { this._busy=false; this.render(); }
   }
 
   questionFileControls() {
@@ -687,7 +713,7 @@ class EsterPanel extends HTMLElement {
             <div class="eyebrow">${this.esc(label)}</div>
             <h3>${enough ? "Ho già una base utile" : "Mi servono ancora osservazioni"}</h3>
             <p>Sto imparando ${this.esc(desc)}.</p>
-            <div class="plain-explain">${avg==null?"Non ho ancora abbastanza esempi.":this.confidenceMeaning(avg)}</div>
+            <div class="plain-explain">${avg==null?"Non ho ancora abbastanza esempi.":"Confidence del modello: "+this.pct(avg)+" · "+this.confidenceMeaning(avg)}</div>
             ${this._advanced ? `<details class="tech-details" open><summary>DETTAGLI TECNICI</summary><pre>${this.esc(JSON.stringify(data,null,2)).slice(0,3000)}</pre></details>` : ''}
           </div>
         </article>`;
@@ -705,7 +731,7 @@ class EsterPanel extends HTMLElement {
     return `
       ${this.viewHeader("VALIDATION / 06","VALIDAZIONE","Qui vedi in parole semplici se E.S.T.E.R. ha già imparato abbastanza.", ready?"QUASI PRONTA":"NON ANCORA","STATO")}
       <article class="health ${ready?"ok":"warn"}">
-        <div class="decision-section primary"><span>POSSO TOGLIERE SHADOW?</span><strong>${ready?"I DATI SONO ABBASTANZA SOLIDI PER LA VALIDAZIONE FINALE":"NO, CONTINUEREI ANCORA IN SHADOW"}</strong></div>
+        <div class="decision-section primary"><span>VALIDAZIONE DEI MODELLI</span><strong>${ready?"I DATI SONO ABBASTANZA SOLIDI PER LA VALIDAZIONE FINALE":"NO, CONTINUEREI ANCORA IN SHADOW"}</strong></div>
         <p>${ready
             ? "I domini principali hanno dati e feedback sufficienti. L'esecuzione reale comunque non è ancora attiva."
             : "Ci sono ancora aree che devono essere osservate o confermate prima di affidare azioni reali a E.S.T.E.R."}</p>
@@ -723,7 +749,7 @@ class EsterPanel extends HTMLElement {
       <h2 class="section-title">PROVA SULLO STORICO</h2>
       <article class="control">
         <p>Puoi farle rileggere il passato per vedere cosa avrebbe deciso, senza aspettare settimane.</p>
-        <div class="button-row"><button data-replay="7">ULTIMA SETTIMANA</button><button data-replay="30">ULTIMO MESE</button><button data-replay="56">ULTIME 8 SETTIMANE</button></div>
+        ${this._advanced ? '<div class="button-row"><button data-replay="7">ULTIMA SETTIMANA</button><button data-replay="30">ULTIMO MESE</button><button data-replay="56">ULTIME 8 SETTIMANE</button></div>' : '<p>I comandi di simulazione sono disponibili nei dettagli tecnici.</p>'}
         ${replay.checkpoints ? `<div class="plain-explain">Ultima prova: ${this.esc(replay.decisions)} decisioni simulate · sicurezza media ${this.pct(replay.avg_checkpoint_confidence)} · ${this.esc(replay.needs_input)} casi in cui avrebbe chiesto aiuto.</div>` : ''}
         ${this._advanced ? `<details class="tech-details"><summary>DETTAGLI TECNICI REPLAY</summary><pre>${this.esc(JSON.stringify(replay,null,2)).slice(0,3500)}</pre></details>` : ''}
       </article>
@@ -731,7 +757,7 @@ class EsterPanel extends HTMLElement {
       <h2 class="section-title">SIMULA UNA GIORNATA DIVERSA</h2>
       <article class="control">
         <p>Serve per vedere come cambierebbero le decisioni se foste in vacanza, aveste ospiti o cambiasse il costo dell'energia.</p>
-        <div class="button-row"><button data-scenario="normal">GIORNATA NORMALE</button><button data-scenario="vacation">VACANZA</button><button data-scenario="guests">OSPITI</button><button data-scenario="illness">MALATTIA</button><button data-scenario="work_from_home">CASA/LAVORO</button></div>
+        ${this._advanced ? '<div class="button-row"><button data-scenario="normal">GIORNATA NORMALE</button><button data-scenario="vacation">VACANZA</button><button data-scenario="guests">OSPITI</button><button data-scenario="illness">MALATTIA</button><button data-scenario="work_from_home">CASA/LAVORO</button></div>' : ''}
         ${scenario.mode ? `<div class="plain-explain">Ultima simulazione: ${this.esc(scenario.mode)} · ${this.esc(scenario.decision_count)} decisioni previste.</div>` : ''}
       </article>
 
@@ -859,7 +885,7 @@ class EsterPanel extends HTMLElement {
     const proposal=this._teachDraft;
     const domains=["presence","climate","lighting","hot_water","energy","ventilation","security","appliances","rooms","other"];
     const labels={presence:"PRESENZA / FAMIGLIA",climate:"CLIMA",lighting:"LUCI",hot_water:"ACQUA CALDA",energy:"ENERGIA / FV / BATTERIA",ventilation:"VENTILAZIONE",security:"SICUREZZA",appliances:"ELETTRODOMESTICI",rooms:"STANZE",other:"ALTRO"};
-    const grouped={}; for(const k of knowledge){(grouped[k.domain||"other"] ||= []).push(k);}
+    const grouped={}; for(const k of knowledge){(grouped[k.domain||k.category||"other"] ||= []).push(k);}
     return `
       ${this.viewHeader("TEACH / 04","INSEGNA","Raccontami liberamente come vivete la casa. Ti mostro cosa ho capito prima di ricordarlo.",String(knowledge.length),"CONOSCENZE")}
       <section class="command-deck teach-main">
@@ -1003,6 +1029,8 @@ class EsterPanel extends HTMLElement {
   }
 
   bind() {
+    const report = this.shadowRoot?.querySelector("#learning-report");
+    if (report) report.onclick=()=>this.exportLearningReport();
     for (const action of ["export", "preview", "confirm"]) {
       const button = this.shadowRoot?.querySelector("#questions-"+action);
       if (button) button.onclick=()=>this.questionFileAction(action);
@@ -1284,7 +1312,7 @@ class EsterPanel extends HTMLElement {
     const thought = this.thoughtState();
 
     const tabs = [
-      ["overview","CORE"],["decisions","DECISIONI"],["questions","DOMANDE"],["teach","INSEGNA"],
+      ["overview","CORE"],["decisions","DECISIONI"],["questions","DOMANDE E RICHIESTE"],["teach","INSEGNA"],
       ["energy","ENERGIA"],["learning","APPRENDIMENTO"],["validation","VALIDAZIONE"],
       ["migration","MIGRAZIONE"],["config","CONFIG"]
     ];
@@ -1347,7 +1375,7 @@ class EsterPanel extends HTMLElement {
       const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety"];
       body = this.viewHeader("DECISION / 02","PROPOSTE","Cosa farebbe E.S.T.E.R. e in quale stanza. Nessuna azione è stata eseguita.",this.pct(s.kpis?.avg_confidence),"FIDUCIA NEI DATI")+'<article class="control decision-explainer"><p>Mostro la proposta più recente per ogni stanza e dispositivo. Le valutazioni ripetute restano nel registro.</p><label>Mostra un argomento<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
     } else if (this._tab === "questions") {
-      body = this.viewHeader("QUESTIONS / 03","DOMANDE","Aiutami a conoscere meglio la casa, una risposta alla volta.",String(questionCount),"DA CHIARIRE")+'<article class="control"><p>Scegli una risposta proposta o scrivi con parole tue. Se non sai rispondere, scegli Non lo so: possiamo tornarci più avanti.</p></article>'+this.questionFileControls()+this.groupedQuestionCards();
+      body = this.viewHeader("QUESTIONS / 03","DOMANDE E RICHIESTE","Aiutami a conoscere meglio la casa, una risposta alla volta.",String(questionCount),"DA CHIARIRE")+'<article class="control"><p>Scegli una risposta proposta o scrivi con parole tue. Se non sai rispondere, scegli Non lo so: possiamo tornarci più avanti.</p></article>'+this.questionFileControls()+this.groupedQuestionCards();
     } else if (this._tab === "teach") {
       body = this.teachView();
     } else if (this._tab === "energy") {
@@ -1483,6 +1511,8 @@ class EsterPanel extends HTMLElement {
       <div class="shell">
         ${this._notice ? '<div class="notice">'+this.esc(this._notice)+'</div>' : ''}
         <div class="mobile-nav-wrap"><nav id="ester-nav">${tabs.map(([id,label])=>`<button data-tab="${id}" class="${this._tab===id?"active":""}">${label}</button>`).join("")}</nav><button id="mode-toggle" class="mode-toggle">${this._advanced?"MODALITÀ SEMPLICE":"DETTAGLI TECNICI"}</button></div>
+        ${this._tab === "learning" || this._tab === "config" ? '<article class="control"><h3>A che punto è E.S.T.E.R.?</h3><p>Scarica un rapporto completo con memoria, sensori, modelli appresi, domande, feedback e proposte. Contiene informazioni sulla casa; condividilo solo se lo desideri.</p><button id="learning-report">SCARICA RAPPORTO COMPLETO</button><p>Memoria salvata e affidabilità operativa sono valutazioni diverse. E.S.T.E.R. resta in Shadow Mode.</p></article>' : ''}
+        ${this._tab === "overview" || this._tab === "learning" ? '<div id="ester-progress">'+this.progressView()+'</div>' : ""}
         ${body}
       </div>
     `;

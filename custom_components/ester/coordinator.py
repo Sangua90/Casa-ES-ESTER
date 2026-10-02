@@ -36,6 +36,8 @@ from .seasonal import season_context
 from .anomaly import detect_anomalies
 from .daily_forecast import daily_forecast
 from .language import knowledge_overview
+from .knowledge_policy import prepare_profiles
+from .progress import progress_status
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,6 +53,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
     async def _async_update_data(self):
         now = dt_util.utcnow()
         profiles = discover_entities(self.hass, self.storage.data["classifications"])
+        profiles, knowledge_application = prepare_profiles(profiles, self.storage.data.get("knowledge", []), self.storage.data["classifications"])
         area_ids = {area.id for area in ar.async_get(self.hass).async_list_areas()}
         entity_ids = set(er.async_get(self.hass).entities) | {p.entity_id for p in profiles}
         history = await self.history.read(profiles, now)
@@ -144,7 +147,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
 
             contexts = active_contexts(data["context_events"], now)
             usage = usage_snapshot(data.get("usage_profiles", []), now, ZoneInfo(self.hass.config.time_zone))
-            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage, data["thermal_models"], data.get("flexible_loads", []), ZoneInfo(self.hass.config.time_zone), data.get("ventilation_models", {}), data.get("hot_water_models", {}), data.get("occupancy_models", {}), data.get("energy_runtime", {}))
+            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage, data["thermal_models"], data.get("flexible_loads", []), ZoneInfo(self.hass.config.time_zone), data.get("ventilation_models", {}), data.get("hot_water_models", {}), data.get("occupancy_models", {}), data.get("energy_runtime", {}), knowledge=data.get("knowledge", []))
             suggestions = data_suggestions(profiles)
             outside_values = [
                 sample_value(p) for p in profiles
@@ -182,7 +185,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 payload["evidence"]["confidence_calibration"] = conf
                 payload["confidence"] = conf["calibrated"]
                 threshold = self.engine.risk_policy.threshold(RiskLevel(payload["risk"]))
-                payload["status"] = "shadow" if payload["confidence"] >= threshold else "needs_input"
+                payload["status"] = "suppressed" if payload["evidence"].get("knowledge_blockers") else ("shadow" if payload["confidence"] >= threshold else "needs_input")
                 payload["evidence"]["objective_score"] = score_decision(payload, data.get("preferences", {}))
                 key = hashlib.sha256(json.dumps([payload["category"], payload["area_id"], payload["title"], sorted(payload["entity_ids"]),
                                                 payload["proposed_action"], payload["evidence"].get("modes")]).encode()).hexdigest()[:24]
@@ -246,7 +249,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
             anomalies,
         )
         knowledge_coverage, knowledge_gaps = knowledge_overview(data)
-        return {"inventory": inventory, "rooms": home_model(profiles, learning),
+        result = {"inventory": inventory, "knowledge_application": knowledge_application, "rooms": home_model(profiles, learning),
                 "profiles": {p.entity_id: p.as_dict() for p in profiles}, "latest_decisions": latest,
                 "decision_count": len(journal), "contexts": contexts, "usage": usage,
                 "questions": [q for q in data.get("questions", []) if q.get("status") == "open"],
@@ -278,3 +281,5 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 "decision_history": [d for d in journal[-100:] if (not d.get("area_id") or d["area_id"] in area_ids) and (not d.get("entity_ids") or any(e in entity_ids for e in d["entity_ids"]))],
                 "flexible_loads": data.get("flexible_loads", []),
                 "evaluated_at": now.isoformat()}
+        result["progress"] = progress_status(data, result, now)
+        return result

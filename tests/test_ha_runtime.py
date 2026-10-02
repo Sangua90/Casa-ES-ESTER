@@ -110,6 +110,11 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
             await self.hass.services.async_call("ester", "add_feedback", {"decision_id": "missing", "rating": "wrong"}, blocking=True)
         response = await self.hass.services.async_call("ester", "get_summary", {}, blocking=True, return_response=True)
         self.assertFalse(response["real_actuation_enabled"])
+        coordinator.data = {"evaluated_at": "2026-10-02T12:00:00+00:00", "profiles": {"sensor.t": {"role": "temperature"}}}
+        diagnostic = await self.hass.services.async_call("ester", "export_learning_report", {}, blocking=True, return_response=True)
+        self.assertEqual(diagnostic["format"], "ester-learning-report-v1")
+        self.assertIn("sensor.t", diagnostic["current_evaluation"]["profiles"])
+        self.assertFalse(diagnostic["real_actuation_enabled"])
         await self.hass.services.async_call("ester", "remove_context", {"event_id": store.data["context_events"][0]["event_id"]}, blocking=True)
         self.assertEqual(store.data["context_events"], [])
         import json

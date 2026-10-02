@@ -14,11 +14,14 @@ from .hot_water import hot_water_shadow_plan
 from .economics import heating_costs
 from .occupancy import predicted_occupancy
 from .seasonal import season_context
+from .knowledge_policy import prepare_profiles, apply_constraints
 
 
 def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None,
              thermal_models=None, flexible_loads=None, local_tz=None, ventilation_models=None,
-             hot_water_models=None, occupancy_models=None, energy_runtime=None):
+             hot_water_models=None, occupancy_models=None, energy_runtime=None, knowledge=None):
+    knowledge = knowledge or []
+    profiles, _ = prepare_profiles(profiles, knowledge)
     thermal_models = thermal_models or {}
     flexible_loads = flexible_loads or []
     ventilation_models = ventilation_models or {}
@@ -375,4 +378,4 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
     if not rooms:
         emit("model", "Stanze non associate", "Associare aree alle entità", "Senza aree non collego sensori e dispositivi arbitrariamente.",
              question="A quali stanze appartengono le entità?")
-    return decisions
+    return apply_constraints(decisions, profiles, knowledge)

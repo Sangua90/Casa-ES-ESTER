@@ -36,6 +36,21 @@ vm.runInNewContext(readFileSync('custom_components/ester/frontend/ester-panel.js
   assert.equal(calls[1].service_data.confirm, true);
   assert.equal(calls[1].service_data.file_json, calls[0].service_data.file_json);
   assert.equal(exchange._questionImport, null);
+  let downloaded, clicked = 0;
+  context.Blob = Blob;
+  context.URL = {createObjectURL: blob => {downloaded=blob;return 'blob:test';},revokeObjectURL() {}};
+  context.document = {createElement: () => ({click() {clicked++;}})};
+  context.setTimeout = callback => callback();
+  exchange._hass = {callWS: async request => {
+    assert.equal(request.service, 'export_learning_report');
+    return {response:{format:'ester-learning-report-v1',real_actuation_enabled:false}};
+  }};
+  await exchange.exportLearningReport();
+  assert.equal(clicked, 1);
+  assert.equal(JSON.parse(await downloaded.text()).format, 'ester-learning-report-v1');
+  display._hass.states['sensor.e_s_t_e_r_shadow_decisions'] = {attributes:{latest:[]}};
+  display._hass.states['sensor.e_s_t_e_r_summary'].attributes.decision_history = [older];
+  assert.equal(display.realDecisions().length, 0);
   for (const id of ['teach', 'answer-test']) {
     const field = {value: 'Testo precedente'};
     const notice = {setAttribute() {}, textContent: ''};
