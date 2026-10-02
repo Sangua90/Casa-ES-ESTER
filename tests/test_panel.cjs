@@ -31,7 +31,8 @@ vm.runInNewContext(readFileSync('custom_components/ester/frontend/ester-panel.js
   exchange._hass = {callWS: async request => {calls.push(request);return {response:{items:[{question:'Comfort?',answer:'21 gradi',interpretation:{summary:'Comfort: 21 °C'}}]}};}};
   await exchange.questionFileAction('preview');
   assert.equal(calls[0].service_data.confirm, false);
-  assert.ok(exchange.questionFileControls().includes('CONFERMA IMPORTAZIONE'));
+  assert.ok(exchange.questionFileControls().includes('SALVA RISPOSTE NELLA MEMORIA'));
+  assert.ok(!exchange.questionFileControls().includes('Comfort: 21'));
   await exchange.questionFileAction('confirm');
   assert.equal(calls[1].service_data.confirm, true);
   assert.equal(calls[1].service_data.file_json, calls[0].service_data.file_json);
@@ -40,6 +41,7 @@ vm.runInNewContext(readFileSync('custom_components/ester/frontend/ester-panel.js
   context.Blob = Blob;
   context.URL = {createObjectURL: blob => {downloaded=blob;return 'blob:test';},revokeObjectURL() {}};
   context.document = {createElement: () => ({click() {clicked++;}})};
+  context.window.document = context.document;
   context.setTimeout = callback => callback();
   exchange._hass = {callWS: async request => {
     assert.equal(request.service, 'export_learning_report');
@@ -48,6 +50,14 @@ vm.runInNewContext(readFileSync('custom_components/ester/frontend/ester-panel.js
   await exchange.exportLearningReport();
   assert.equal(clicked, 1);
   assert.equal(JSON.parse(await downloaded.text()).format, 'ester-learning-report-v1');
+  exchange.downloadNotesTemplate();
+  assert.equal(JSON.parse(await downloaded.text()).format, 'ester-knowledge-v1');
+  display._teachDraft = {source:'knowledge_files',items:[{statement:'PRIVATE FILE CONTENT'}]};
+  const notesView = display.teachView();
+  assert.ok(notesView.includes('SALVA NELLA MEMORIA'));
+  assert.ok(!notesView.includes('PRIVATE FILE CONTENT'));
+  assert.ok(!display.configView().includes('id="class-save"'));
+  assert.ok(display.configView(true).includes('id="class-save"'));
   display._hass.states['sensor.e_s_t_e_r_shadow_decisions'] = {attributes:{latest:[]}};
   display._hass.states['sensor.e_s_t_e_r_summary'].attributes.decision_history = [older];
   assert.equal(display.realDecisions().length, 0);

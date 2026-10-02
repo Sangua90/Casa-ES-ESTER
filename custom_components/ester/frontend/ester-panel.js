@@ -517,7 +517,7 @@ class EsterPanel extends HTMLElement {
 
   questionFileControls() {
     const plan = this._questionImport?.items;
-    return `<article class="control"><h3>Rispondi con l'aiuto di ChatGPT</h3><p>Scarica tutte le domande, carica il file in ChatGPT e chiedi di spiegarle e raccogliere le tue risposte. Poi importa il file restituito: aggiorna solo la memoria.</p><button id="questions-export">SCARICA TUTTE LE DOMANDE</button><p><label>File di risposte <input type="file" id="questions-file" accept=".json,application/json"></label></p><button id="questions-preview">MOSTRA ANTEPRIMA</button>${plan ? `<h3>Anteprima: ${plan.length} risposte</h3>${plan.map(x=>`<details><summary>${this.esc(x.question)}</summary><p>${this.esc(x.answer || "Domanda non più pertinente")}</p><p>${this.esc(x.interpretation?.summary || "Salverò una nota nella memoria.")}</p></details>`).join("")}<p>Le domande senza risposta restano aperte. Nessun dispositivo verrà comandato.</p><button id="questions-confirm" ${plan.length ? "" : "disabled"}>CONFERMA IMPORTAZIONE</button><button id="questions-cancel">ANNULLA</button>` : ""}</article>`;
+    return `<article class="control"><h3>Rispondi con l'aiuto di ChatGPT</h3><p>Scarica tutte le domande, carica il file in ChatGPT e chiedi di spiegarle e raccogliere le tue risposte. Poi importa il file restituito: aggiorna solo la memoria.</p><button id="questions-export">SCARICA TUTTE LE DOMANDE</button><p><label>File di risposte <input type="file" id="questions-file" accept=".json,application/json"></label></p><button id="questions-preview">CARICA FILE</button>${plan ? `<h3>File recepito · ${plan.length} risposte pronte</h3><p>Le domande senza risposta restano aperte. Nessun dispositivo verrà comandato.</p><button id="questions-confirm" ${plan.length ? "" : "disabled"}>SALVA RISPOSTE NELLA MEMORIA</button><button id="questions-cancel">ANNULLA</button>` : ""}</article>`;
   }
 
   async questionFileAction(action) {
@@ -540,11 +540,11 @@ class EsterPanel extends HTMLElement {
           if (!file || file.size > 1000000) throw Error("Scegli un file JSON di massimo 1 MB.");
           content = await file.text();
         }
-        if (!content) throw Error("Mostra prima l'anteprima del file.");
+        if (!content) throw Error("Carica prima il file.");
         result = await this._hass.callWS({type:"call_service", domain:"ester", service:"import_question_file", service_data:{file_json:content, confirm:action === "confirm"}, return_response:true});
         if (action === "preview") {
           this._questionImport = result?.response || result; this._questionImportContent = content;
-          this._notice = "Controlla le risposte prima di confermare. La memoria non è stata modificata.";
+          this._notice = "File ricevuto e verificato. Premi SALVA RISPOSTE NELLA MEMORIA per completare.";
         } else {
           this._questionImport = null; this._questionImportContent = null;
           this._notice = "Risposte importate nella memoria di E.S.T.E.R.";
@@ -814,7 +814,7 @@ class EsterPanel extends HTMLElement {
       ${this._collectionError ? `<p role="alert">${this.esc(this._collectionError)}</p>` : ""}
       <button id="knowledge-collection-refresh" ${this._loadingCollection ? "disabled" : ""}>${this._loadingCollection ? "VERIFICA…" : "AGGIORNA RACCOLTA"}</button>
       ${(collection?.files || []).map(file=>`<div class="knowledge-row"><b>${this.esc(file.name)}</b><span>${labels[file.status] || "SALVATO"}</span><small>${file.size} byte · ${this.esc(new Date(file.uploaded_at).toLocaleString("it-IT"))} · ${file.knowledge_count} conoscenze collegate</small>${file.names?.length > 1 ? `<small>Nomi usati: ${file.names.map(n=>this.esc(n)).join(", ")}</small>` : ""}</div>`).join("") || `<p>${collection ? "Nessun file salvato." : "Verifica dei file salvati in corso…"}</p>`}
-      ${(collection?.pending || []).map(proposal=>`<div class="knowledge-row"><span>${this.esc(proposal.summary)}</span><button data-file-proposal="${this.esc(proposal.proposal_id)}">VEDI ANTEPRIMA E CONFERMA</button></div>`).join("")}
+      ${(collection?.pending || []).map(proposal=>`<div class="knowledge-row"><span>${this.esc(proposal.summary)}</span><button data-file-proposal="${this.esc(proposal.proposal_id)}">SALVA NELLA MEMORIA</button></div>`).join("")}
       <p class="hint">Il conteggio distingue i contenuti, non i nomi: ricaricare lo stesso file non crea un'altra copia.</p></article>`;
   }
 
@@ -877,6 +877,14 @@ class EsterPanel extends HTMLElement {
     finally { this._busy = false; this.render(); }
   }
 
+  downloadNotesTemplate() {
+    const document = {format:"ester-knowledge-v1", items:[{statement:"Sostituisci questa frase con la nota che vuoi insegnare a E.S.T.E.R.", domain:"other", kind:"fact", area_id:""}]};
+    const url = URL.createObjectURL(new Blob([JSON.stringify(document,null,2)], {type:"application/json;charset=utf-8"}));
+    const link = window.document.createElement("a");
+    link.href=url; link.download="ester-modello-note.json"; link.click();
+    URL.revokeObjectURL(url);
+  }
+
   teachView() {
     const s=this.summary();
     const knowledge=s.knowledge_items || [];
@@ -890,7 +898,9 @@ class EsterPanel extends HTMLElement {
       ${this.viewHeader("TEACH / 04","INSEGNA","Raccontami liberamente come vivete la casa. Ti mostro cosa ho capito prima di ricordarlo.",String(knowledge.length),"CONOSCENZE")}
       <section class="command-deck teach-main">
         <article class="control">
-          <h3>Aggiungi conoscenze da file</h3>
+          <h3>Note per E.S.T.E.R. · carica un file</h3>
+          <p>Ti è venuta in mente una cosa da raccontarmi? Puoi far preparare un JSON a ChatGPT e caricarlo qui, come se me la dicessi a voce. Dopo il caricamento, premi SALVA NELLA MEMORIA per salvarla nella memoria attiva.</p>
+          <button id="notes-template">SCARICA MODELLO JSON PER CHATGPT</button>
           <p>Carica racconti della casa o descrizioni delle automazioni. Le nuove informazioni si aggiungono: quelle esistenti rimangono. I duplicati esatti vengono ignorati. Le descrizioni non vengono eseguite come automazioni.</p>
           <label for="knowledge-files">AGGIUNGI UNO O PIÙ FILE</label>
           <input id="knowledge-files" type="file" multiple accept=".json,.txt,.md" aria-label="Aggiungi uno o più file di conoscenza" ${this._busy ? "disabled" : ""} />
@@ -906,7 +916,7 @@ class EsterPanel extends HTMLElement {
         <p>Non devi usare parole precise. Puoi parlare di più cose insieme: luci, clima, orari, persone, eccezioni e priorità.</p>
         <div class="command-input"><textarea id="teach" placeholder="Per esempio: «La sera in salotto vogliamo circa 21 gradi. Se non c'è nessuno non serve scaldarlo. Le luci esterne servono quando rientriamo col buio…»"></textarea><button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button><button id="teach-send">${this._busy?"...":"CAPIRE"}</button></div>
       </section>
-      ${proposal ? `<h2 class="section-title">QUELLO CHE HO CAPITO</h2><article class="control teach-review"><p>${this.esc(proposal.summary||"Controlla questi punti.")}</p><div class="knowledge-list">${(proposal.items||[]).map(x=>`<div class="knowledge-row"><b>${this.esc(labels[x.domain]||this.categoryLabel(x.domain))}</b><span>${this.esc(x.statement)}</span><small>${this.esc((x.kind||"informazione").replaceAll("_"," "))} · ${this.pct(x.confidence)}</small></div>`).join("")||'<div class="empty">Non ho estratto informazioni affidabili.</div>'}</div><div class="button-row"><button id="teach-confirm">CONFERMA E RICORDA</button><button id="teach-discard">SCARTA</button></div><p class="hint">Finché non confermi, queste informazioni non diventano conoscenze attive. I file caricati restano conservati nella raccolta.</p></article>` : ""}
+      ${proposal?.source === "knowledge_files" ? `<article class="control teach-review"><h3>File ricevuto e verificato</h3><p>${(proposal.items || []).length} nuove informazioni pronte per il salvataggio.</p><button id="teach-confirm">SALVA NELLA MEMORIA</button><button id="teach-discard">ANNULLA SALVATAGGIO</button><p>Il contenuto non viene mostrato. Dopo il salvataggio, le note saranno conoscenze attive di E.S.T.E.R.</p></article>` : proposal ? `<h2 class="section-title">QUELLO CHE HO CAPITO</h2><article class="control teach-review"><p>${this.esc(proposal.summary||"Controlla questi punti.")}</p><div class="knowledge-list">${(proposal.items||[]).map(x=>`<div class="knowledge-row"><b>${this.esc(labels[x.domain]||this.categoryLabel(x.domain))}</b><span>${this.esc(x.statement)}</span><small>${this.esc((x.kind||"informazione").replaceAll("_"," "))} · ${this.pct(x.confidence)}</small></div>`).join("")||'<div class="empty">Non ho estratto informazioni affidabili.</div>'}</div><div class="button-row"><button id="teach-confirm">CONFERMA E RICORDA</button><button id="teach-discard">SCARTA</button></div><p class="hint">Finché non confermi, queste informazioni non diventano conoscenze attive. I file caricati restano conservati nella raccolta.</p></article>` : ""}
       <h2 class="section-title">COSA MI HAI INSEGNATO</h2>
       ${knowledge.length ? `<section class="grid">${domains.filter(d=>grouped[d]?.length).map(d=>{const items=grouped[d];const cv=coverage[d]||{};return `<article class="control knowledge-domain"><div class="eyebrow">${labels[d]}</div><h3>${items.length} informazioni</h3><p>${this.esc(cv.meaning|| "Ecco le informazioni conservate.")}</p>${items.slice(-5).map(x=>`<div class="knowledge-mini">${this.esc(x.statement||x.text||"")}</div>`).join("")}</article>`}).join("")}</section>` : '<article class="control"><h3>Cominciamo con una cosa semplice</h3><p>Raccontami come usate una stanza, oppure carica un file. Ti mostrerò quello che ho capito prima di salvarlo.</p></article>'}
       <h2 class="section-title">COSA MI MANCA</h2>
@@ -914,7 +924,20 @@ class EsterPanel extends HTMLElement {
     `;
   }
 
-  configView() {
+  requestsOverview() {
+    const s=this.summary();
+    const items=[...(s.data_suggestions || []).map(x=>({title:x.title, detail:x.next_step, why:x.benefit})),
+      ...(s.knowledge_gaps || []).map(x=>({title:x.title, detail:x.why})), ...(s.knowledge_audit || []).filter(x=>x.operational_verification_pending).map(x=>({title:"Regola memorizzata da verificare",detail:x.statement,why:x.explanation})),
+      ...(s.knowledge_application || []).filter(x=>x.status!=="applied").map(x=>({title:"Associazione da verificare",detail:x.reason || x.status,why:x.entity_id}))];
+    return `<h2 class="section-title">DATI E ASSOCIAZIONI DA VERIFICARE</h2><p>Queste segnalazioni sono incluse nel file delle domande, per farle spiegare a ChatGPT. Un problema tecnico non richiede una risposta inventata: se hai informazioni da aggiungere, caricale in Insegna.</p><section class="grid">${items.map(x=>`<article class="control"><h3>${this.esc(x.title)}</h3><p>${this.esc(x.detail || "")}</p><small>${this.esc(x.why || "")}</small></article>`).join("") || '<div class="empty">Nessuna segnalazione in questo momento.</div>'}</section>`;
+  }
+
+  configView(tools=false) {
+    if (!tools) {
+      const s=this.summary();
+      return this.viewHeader("CONFIG / 08","CONFIGURAZIONE","Riepilogo della memoria e delle impostazioni. Per le modifiche usa Domande e richieste.","SHADOW","MODALITÀ")+
+        `<section class="grid"><article class="control"><h3>Memoria</h3><p>${(s.knowledge_items || []).length} informazioni mostrate · ${(s.memory_versions || []).length} versioni disponibili</p></article><article class="control"><h3>Uso della casa</h3><p>${(s.usage_profiles || []).length} routine · ${(s.flexible_loads || []).length} carichi configurati</p></article></section>`;
+    }
     const weights = ["safety","comfort","cost","energy","equipment","confidence"];
     const defaults = {safety:1,comfort:.75,cost:.6,energy:.65,equipment:.55,confidence:.9};
     const prefs = this.prefs();
@@ -923,8 +946,6 @@ class EsterPanel extends HTMLElement {
     const loads = this.summary().flexible_loads || [];
     const gaps = this.state("sensor.e_s_t_e_r_data_suggestions")?.attributes?.items || [];
     return `
-      ${this.viewHeader("CONFIG / 08","CONFIGURAZIONE","Routine, carichi, mappature, pesi decisionali e memoria.","ADMIN","ACCESS")}
-      <article class="control"><h3>Da dove iniziare</h3><p>Per raccontare come vivete la casa, apri Insegna. Per scegliere temperature e chiarire i dati mancanti, apri Domande. Qui trovi le impostazioni avanzate e i backup.</p><div class="button-row"><button data-open-tab="teach">INSEGNA LE ABITUDINI</button><button data-open-tab="questions">RISPONDI ALLE DOMANDE</button></div></article>
       <details class="advanced-config"><summary>Apri impostazioni avanzate e backup</summary>
       <p>Questi campi servono per configurare sensori e simulazioni. Non è necessario completarli tutti per iniziare a insegnare.</p>
       <h2 class="section-title">PESI MULTI-OBIETTIVO</h2>
@@ -1064,6 +1085,8 @@ class EsterPanel extends HTMLElement {
     if (snapshot) snapshot.onclick=()=>this.snapshot();
     const memoryExport = this.shadowRoot?.querySelector("#memory-export");
     const knowledgeFiles = this.shadowRoot?.querySelector("#knowledge-files-upload");
+    const notesTemplate = this.shadowRoot?.querySelector("#notes-template");
+    if (notesTemplate) notesTemplate.onclick=()=>this.downloadNotesTemplate();
     if (knowledgeFiles) knowledgeFiles.onclick=()=>this.uploadKnowledgeFiles();
     const knowledgeInput = this.shadowRoot?.querySelector("#knowledge-files");
     if (knowledgeInput) knowledgeInput.onchange=()=>this.selectKnowledgeFiles(knowledgeInput.files);
@@ -1074,7 +1097,7 @@ class EsterPanel extends HTMLElement {
     this.shadowRoot?.querySelectorAll("[data-file-proposal]").forEach(button=>button.onclick=()=>{
       if (this._busy) return;
       this._teachDraft = this._fileCollection?.pending?.find(p=>p.proposal_id===button.dataset.fileProposal);
-      this.render(); this.shadowRoot?.querySelector(".teach-review")?.scrollIntoView({behavior:"smooth",block:"start"});
+      this.confirmTeach();
     });
     if (memoryExport) memoryExport.onclick=()=>this.exportMemory();
     const memoryImport = this.shadowRoot?.querySelector("#memory-import-send");
@@ -1375,7 +1398,7 @@ class EsterPanel extends HTMLElement {
       const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety"];
       body = this.viewHeader("DECISION / 02","PROPOSTE","Cosa farebbe E.S.T.E.R. e in quale stanza. Nessuna azione è stata eseguita.",this.pct(s.kpis?.avg_confidence),"FIDUCIA NEI DATI")+'<article class="control decision-explainer"><p>Mostro la proposta più recente per ogni stanza e dispositivo. Le valutazioni ripetute restano nel registro.</p><label>Mostra un argomento<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
     } else if (this._tab === "questions") {
-      body = this.viewHeader("QUESTIONS / 03","DOMANDE E RICHIESTE","Aiutami a conoscere meglio la casa, una risposta alla volta.",String(questionCount),"DA CHIARIRE")+'<article class="control"><p>Scegli una risposta proposta o scrivi con parole tue. Se non sai rispondere, scegli Non lo so: possiamo tornarci più avanti.</p></article>'+this.questionFileControls()+this.groupedQuestionCards();
+      body = this.viewHeader("QUESTIONS / 03","DOMANDE E RICHIESTE","Aiutami a conoscere meglio la casa, una risposta alla volta.",String(questionCount),"DA CHIARIRE")+'<article class="control"><p>Scegli una risposta proposta o scrivi con parole tue. Se non sai rispondere, scegli Non lo so: possiamo tornarci più avanti.</p></article>'+this.questionFileControls()+this.groupedQuestionCards()+this.requestsOverview()+this.configView(true);
     } else if (this._tab === "teach") {
       body = this.teachView();
     } else if (this._tab === "energy") {

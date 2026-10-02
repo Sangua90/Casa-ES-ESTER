@@ -195,7 +195,6 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
             await page.locator('[data-file-proposal]').wait_for()
             self.assertIn('Raccolta file conservati in memoria · 2', await page.locator('#knowledge-collection').inner_text())
             await page.locator('[data-file-proposal]').click()
-            await page.locator('#teach-confirm').click()
             await page.wait_for_function("document.querySelector('ester-panel')._teachDraft === null")
             self.assertEqual(len(self.store.data['knowledge']), 2)
             await page.locator('#knowledge-files').set_input_files([
