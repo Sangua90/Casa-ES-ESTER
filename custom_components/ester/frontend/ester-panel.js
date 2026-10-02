@@ -867,7 +867,7 @@ class EsterPanel extends HTMLElement {
       this._fileCollection = result.collection;
       this._collectionError = "";
       this._knowledgeFiles = [];
-      this.updateUploadStatus(`${result.uploaded_files.length} file salvati e conservati nella memoria di Home Assistant. Li trovi nella raccolta. Conferma l'anteprima per aggiungere le conoscenze.`, 100);
+      this.updateUploadStatus(`${result.uploaded_files.length} file salvati e conservati nella memoria di Home Assistant. Li trovi nella raccolta. Premi SALVA NELLA MEMORIA per attivare le conoscenze.`, 100);
       this._notice = this._uploadStatus;
     } catch (err) {
       this.updateUploadStatus("Caricamento non confermato: " + (err?.message || "errore"), 0);
@@ -1386,7 +1386,7 @@ class EsterPanel extends HTMLElement {
 
         <section class="command-deck">
           <div class="command-head"><span>CONOSCENZA CASA</span><b>INSEGNA A E.S.T.E.R.</b></div>
-          <p>Per raccontarmi come vivete la casa, cosa preferite e le eccezioni, usa la sezione INSEGNA. Prima di ricordare qualcosa ti farò sempre controllare cosa ho capito.</p>
+          <p>Per raccontarmi come vivete la casa, cosa preferite e le eccezioni, usa la sezione INSEGNA. Per i file bastano caricamento e salvataggio; per i racconti ti mostro cosa ho capito.</p>
           <button data-tab="teach">APRI INSEGNA</button>
         </section>
         <h2 class="section-title">PREVISIONE CASA</h2>
