@@ -84,6 +84,12 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(second._store, "async_load", return_value=None):
             await second.async_load()
         self.assertEqual(second.data["knowledge_documents"], store.data["knowledge_documents"])
+        await store._backup_store.async_save({"copies": [{"memory": {}, "sha256": "invalid"}]})
+        invalid = EsterStorage(self.hass)
+        with patch.object(invalid._store, "async_load", return_value=None), patch.object(invalid._store, "async_save", new_callable=AsyncMock) as write:
+            with self.assertRaises(ValueError):
+                await invalid.async_load()
+            write.assert_not_awaited()
         fake_hass = SimpleNamespace(config_entries=SimpleNamespace(async_loaded_entries=lambda domain: [SimpleNamespace(runtime_data=SimpleNamespace(storage=store))]))
         with patch.object(store, "async_create_backup", wraps=store.async_create_backup) as flush:
             await async_pre_backup(fake_hass)

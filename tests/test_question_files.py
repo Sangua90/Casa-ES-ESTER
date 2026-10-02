@@ -15,6 +15,15 @@ NOW = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
 
 class QuestionFilesTests(unittest.TestCase):
+    def test_new_answers_and_teaching_never_drop_older_knowledge(self):
+        language = importlib.import_module("ester_core.language")
+        old = [{"knowledge_id": str(i), "text": "memoria precedente"} for i in range(1001)]
+        data = {"knowledge": deepcopy(old), "questions": [{"question_id": "note", "status": "open", "category": "other", "prompt": "Come usi la casa?"}]}
+        questions.apply_answer(data, "note", "Normalmente lavoro da casa", NOW)
+        language.store_teaching_items(data, {"items": [{"statement": "Una nuova nota", "domain": "other", "kind": "fact"}]}, NOW)
+        self.assertEqual(data["knowledge"][:1001], old)
+        self.assertEqual(len(data["knowledge"]), 1003)
+
     def setUp(self):
         self.data = {"questions": [{"question_id": "q1", "status": "open", "category": "climate",
                                   "area_id": "studio", "prompt": "Comfort?", "comfort_season": "winter",
