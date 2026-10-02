@@ -6,7 +6,7 @@ from datetime import datetime
 from uuid import uuid4
 
 SNAPSHOT_KEYS = (
-    "preferences", "classifications", "usage_profiles", "knowledge",
+    "preferences", "classifications", "usage_profiles", "knowledge", "brain_notes", "brain_experiences",
     "context_events", "flexible_loads",
     "safety_policies", "fallback_policies",
 )
@@ -38,4 +38,6 @@ def restore_snapshot(data: dict, snapshot_id: str) -> dict:
         raise KeyError("unknown_snapshot")
     for key, value in snapshot["memory"].items():
         data[key] = deepcopy(value)
+    for key in ("brain_notes", "brain_experiences"):
+        data[key] = deepcopy(snapshot["memory"].get(key, []))
     return snapshot

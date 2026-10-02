@@ -22,9 +22,11 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
         from custom_components.ester.storage import EsterStorage
         self.directory = tempfile.TemporaryDirectory()
         self.hass = HomeAssistant(self.directory.name)
-        from homeassistant.helpers import device_registry
+        from homeassistant.helpers import device_registry, area_registry, entity_registry
         device_registry.async_setup(self.hass)
         await device_registry.async_load(self.hass)
+        await area_registry.async_load(self.hass)
+        await entity_registry.async_load(self.hass)
         self.hass.auth = await auth_manager_from_config(self.hass, [], [])
         self.admin = await self.hass.auth.async_create_user("Upload admin")
         self.member = await self.hass.auth.async_create_user("Member")
@@ -47,6 +49,24 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
         await self.client.close()
         await self.hass.async_stop(force=True)
         self.directory.cleanup()
+
+    async def test_brain_note_failure_and_experience_persistence(self):
+        from homeassistant.core import Context
+        from homeassistant.exceptions import HomeAssistantError
+        from unittest.mock import patch
+        self.store.data['decisions'] = [{'decision_id':'case1','category':'lighting','area_id':'room',
+            'entity_ids':['light.room'],'title':'Luce','proposed_action':'Mantieni accesa','confidence':.9,
+            'created_at':'2026-10-02T10:00:00+00:00','status':'shadow','evidence':{'observations':{'light.room':{'state':'on'}}}}]
+        await self.hass.services.async_call('ester','add_feedback',{'decision_id':'case1','rating':'correct'},
+            blocking=True,context=Context(user_id=self.admin.id))
+        restored=type(self.store)(self.hass)
+        await restored.async_load()
+        self.assertEqual(restored.data['brain_experiences'][0]['rating'],'correct')
+        with patch.object(self.store,'async_save',side_effect=OSError('disk failed')):
+            with self.assertRaises((OSError,HomeAssistantError)):
+                await self.hass.services.async_call('ester','save_brain_note',{'statement':'Non salvata'},
+                    blocking=True,return_response=True,context=Context(user_id=self.admin.id))
+        self.assertEqual(self.store.data['brain_notes'],[])
 
     async def upload(self, files, token=None):
         from aiohttp import FormData
@@ -147,7 +167,7 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
         async def service(request):
             data = await request.json()
             result = await self.hass.services.async_call('ester', data['service'], data['service_data'],
-                blocking=True, return_response=True, context=Context(user_id=self.admin.id))
+                blocking=True, return_response=data.get('return_response', False), context=Context(user_id=self.admin.id))
             return web.json_response({'response': result})
         self.http.app.router.add_get('/test', page)
         self.http.app.router.add_get('/test-panel.js', script)
@@ -164,7 +184,7 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
               panel.hass = {states:{}, auth:{accessToken:token,expired:false},
                 hassUrl:path=>new URL(path,location.origin).href,
                 callWS:async data=>(await fetch('/test-service',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})).json(),
-                callService:async()=>{}};
+                callService:async(domain,service,service_data)=>(await fetch('/test-service',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain,service,service_data})})).json()};
               panel.render();
             }''', self.token)
             await page.wait_for_function("document.querySelector('ester-panel')._fileCollection !== null")
@@ -195,7 +215,7 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
             await page.locator('[data-file-proposal]').wait_for()
             self.assertIn('Raccolta file conservati in memoria · 2', await page.locator('#knowledge-collection').inner_text())
             await page.locator('[data-file-proposal]').click()
-            await page.wait_for_function("document.querySelector('ester-panel')._teachDraft === null")
+            await page.wait_for_function("document.querySelector('ester-panel')._teachDraft === null && !document.querySelector('ester-panel')._busy")
             self.assertEqual(len(self.store.data['knowledge']), 2)
             await page.locator('#knowledge-files').set_input_files([
                 {'name':'bad.json','mimeType':'application/json','buffer':b'{}'}])
@@ -213,15 +233,49 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
             await page.locator('#knowledge-files-upload').click()
             await page.locator('#teach-confirm').wait_for()
             await page.locator('#teach-confirm').click()
-            await page.wait_for_function("document.querySelector('ester-panel')._teachDraft === null")
+            await page.wait_for_function("document.querySelector('ester-panel')._teachDraft === null && !document.querySelector('ester-panel')._busy")
             self.assertEqual(len(self.store.data['knowledge']), 3)
             self.assertTrue(await page.evaluate('''() => {
               const panel = document.querySelector('ester-panel');
+              panel._advanced=true; panel.render();
               const nav = panel.shadowRoot.querySelector('nav');
               nav.scrollLeft = 150; const before = nav.scrollLeft;
               panel.hass = {...panel._hass};
               return nav.scrollLeft === before && before > 0;
             }'''))
+            await page.evaluate('''() => {
+              const panel=document.querySelector('ester-panel');
+              panel._tab='brain'; panel._advanced=false; panel.render();
+            }''')
+            await page.wait_for_function("document.querySelector('ester-panel')._brain !== null")
+            self.assertEqual(await page.locator('nav [data-tab]').count(), 3)
+            await page.locator('summary').filter(has_text='INFORMAZIONI CHE CAMBIANO NEL TEMPO').click()
+            await page.locator('#brain-note').fill('Tariffa temporanea confermata')
+            await page.locator('#brain-domain').select_option('energy')
+            await page.locator('#brain-effect').select_option('energy_price')
+            await page.locator('#brain-value').fill('0.31')
+            await page.evaluate("document.querySelector('ester-panel').hass={...document.querySelector('ester-panel')._hass}")
+            self.assertEqual(await page.locator('#brain-note').input_value(), 'Tariffa temporanea confermata')
+            await page.locator('#brain-note-save').click()
+            await page.wait_for_function("document.querySelector('ester-panel')._brain.preferences.energy_price_eur_kwh === 0.31")
+            await page.locator('summary').filter(has_text='INFORMAZIONI CHE CAMBIANO NEL TEMPO').click()
+            self.assertEqual(await page.locator('#brain-note').input_value(), '')
+            restored = type(self.store)(self.hass)
+            await restored.async_load()
+            self.assertEqual(restored.data['brain_notes'][0]['effect']['value'], .31)
+            self.assertEqual(len(restored.data['knowledge_documents']), 3)
+            await page.locator('summary').filter(has_text='MEMORIA CONSERVATA').click()
+            await page.locator('[data-brain-edit]').click()
+            await page.locator('#brain-value').fill('0.29')
+            await page.locator('#brain-note-save').click()
+            await page.wait_for_function("document.querySelector('ester-panel')._brain.preferences.energy_price_eur_kwh === 0.29")
+            self.assertEqual(self.store.data['brain_notes'][0]['status'], 'superseded')
+            await page.locator('summary').filter(has_text='MEMORIA CONSERVATA').click()
+            await page.locator('[data-brain-retract]').click()
+            await page.wait_for_function("!('energy_price_eur_kwh' in document.querySelector('ester-panel')._brain.preferences)")
+            if os.environ.get('ESTER_BRAIN_SCREENSHOT'):
+                await page.screenshot(path=os.environ['ESTER_BRAIN_SCREENSHOT'], full_page=True)
+            self.assertTrue(await page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
             await page.evaluate('''() => {
               const panel = document.querySelector('ester-panel');
               panel._tab = 'overview'; panel._notice = '';

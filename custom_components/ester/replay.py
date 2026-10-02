@@ -32,8 +32,10 @@ async def run_historical_replay(hass, coordinator, *, days: int = 7, step_minute
     start = now - timedelta(days=days)
 
     from .knowledge_policy import prepare_profiles
-    discovered, _ = prepare_profiles(discover_entities(hass, coordinator.storage.data["classifications"]),
-                                    coordinator.storage.data.get("knowledge", []), coordinator.storage.data["classifications"])
+    from .brain import working_memory
+    discovered = discover_entities(hass, coordinator.storage.data["classifications"])
+    discovered, _ = prepare_profiles(discovered,
+                                    working_memory(coordinator.storage.data, discovered, now)["knowledge"], coordinator.storage.data["classifications"])
     profiles = [
         p for p in discovered
         if p.role in REPLAY_ROLES
@@ -126,6 +128,7 @@ async def run_historical_replay(hass, coordinator, *, days: int = 7, step_minute
                 data.get("occupancy_models", {}),
                 {},
                 knowledge=data.get("knowledge", []),
+                memory=data,
             )
             if proposals:
                 decision_count += len(proposals)

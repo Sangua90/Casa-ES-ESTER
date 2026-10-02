@@ -15,11 +15,15 @@ from .economics import heating_costs
 from .occupancy import predicted_occupancy
 from .seasonal import season_context
 from .knowledge_policy import prepare_profiles, apply_constraints
+from .brain import working_memory, decision_memory
+from .experiences import similar_cases
 
 
 def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, usage=None,
              thermal_models=None, flexible_loads=None, local_tz=None, ventilation_models=None,
-             hot_water_models=None, occupancy_models=None, energy_runtime=None, knowledge=None):
+             hot_water_models=None, occupancy_models=None, energy_runtime=None, knowledge=None, memory=None):
+    frame = working_memory(memory or {"knowledge": knowledge or []}, profiles, now, preferences, contexts)
+    knowledge, preferences, contexts = frame["knowledge"], frame["preferences"], frame["contexts"]
     knowledge = knowledge or []
     profiles, _ = prepare_profiles(profiles, knowledge)
     thermal_models = thermal_models or {}
@@ -117,7 +121,7 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
                     emit("climate", "Scostamento dal comfort", action,
                          f"Stanza occupata o prevista in uso: {t:.1f} °C rispetto a {target:.1f} °C.",
                          temps + climates + presence, risk="medium",
-                         evidence={"target_c": target, "expected_use": expected,
+                         evidence={"target_c": target, "comfort_season": season, "expected_use": expected,
                                    "learned_occupancy": learned_occ, "heating_economics": econ})
             elif upcoming and "vacation" not in scope_modes:
                 next_use = upcoming[0]
@@ -150,7 +154,7 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
                         )
                     emit("climate", "Uso stanza previsto", action, reason,
                          temps + climates + presence, risk="medium",
-                         evidence={"target_c": use_target, "expected_use": expected,
+                         evidence={"target_c": use_target, "comfort_season": season, "expected_use": expected,
                                    "thermal_model": model, "strategies": strategies,
                                    "temperature_entity_ids": [p.entity_id for p in temps]})
             elif "vacation" in scope_modes:
@@ -378,4 +382,7 @@ def evaluate(engine, profiles, learning, contexts, preferences, feedback, now, u
     if not rooms:
         emit("model", "Stanze non associate", "Associare aree alle entità", "Senza aree non collego sensori e dispositivi arbitrariamente.",
              question="A quali stanze appartengono le entità?")
-    return apply_constraints(decisions, profiles, knowledge)
+    decisions = decision_memory(apply_constraints(decisions, profiles, knowledge), frame)
+    for decision in decisions:
+        decision.evidence["similar_experiences"] = similar_cases(memory or {}, decision)
+    return decisions

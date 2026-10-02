@@ -5,6 +5,7 @@ from datetime import timedelta
 import hashlib
 import json
 import logging
+from time import perf_counter
 from zoneinfo import ZoneInfo
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -39,6 +40,8 @@ from .language import knowledge_overview
 from .knowledge_policy import prepare_profiles
 from .progress import progress_status
 from .diagnostics_report import knowledge_audit
+from .brain import working_memory, reconcile_questions
+from .experiences import remember
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,15 +55,18 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
         self.history = HistoryReader(hass)
 
     async def _async_update_data(self):
+        started = perf_counter()
         now = dt_util.utcnow()
         profiles = discover_entities(self.hass, self.storage.data["classifications"])
-        profiles, knowledge_application = prepare_profiles(profiles, self.storage.data.get("knowledge", []), self.storage.data["classifications"])
+        frame = working_memory(self.storage.data, profiles, now)
+        profiles, knowledge_application = prepare_profiles(profiles, frame["knowledge"], self.storage.data["classifications"])
         area_ids = {area.id for area in ar.async_get(self.hass).async_list_areas()}
         entity_ids = set(er.async_get(self.hass).entities) | {p.entity_id for p in profiles}
         history = await self.history.read(profiles, now)
         events = []
         async with self.storage.lock:
             data = self.storage.data
+            frame = working_memory(data, profiles, now)
             live = data.setdefault("samples", {})
             learning = {}
             selected = {p.entity_id for p in profiles[:500]}
@@ -148,7 +154,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
 
             contexts = active_contexts(data["context_events"], now)
             usage = usage_snapshot(data.get("usage_profiles", []), now, ZoneInfo(self.hass.config.time_zone))
-            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage, data["thermal_models"], data.get("flexible_loads", []), ZoneInfo(self.hass.config.time_zone), data.get("ventilation_models", {}), data.get("hot_water_models", {}), data.get("occupancy_models", {}), data.get("energy_runtime", {}), knowledge=data.get("knowledge", []))
+            proposals = evaluate(self.engine, profiles, learning, contexts, data["preferences"], data["feedback"], now, usage, data["thermal_models"], data.get("flexible_loads", []), ZoneInfo(self.hass.config.time_zone), data.get("ventilation_models", {}), data.get("hot_water_models", {}), data.get("occupancy_models", {}), data.get("energy_runtime", {}), memory=data)
             suggestions = data_suggestions(profiles)
             outside_values = [
                 sample_value(p) for p in profiles
@@ -186,8 +192,8 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 payload["evidence"]["confidence_calibration"] = conf
                 payload["confidence"] = conf["calibrated"]
                 threshold = self.engine.risk_policy.threshold(RiskLevel(payload["risk"]))
-                payload["status"] = "suppressed" if payload["evidence"].get("knowledge_blockers") else ("shadow" if payload["confidence"] >= threshold else "needs_input")
-                payload["evidence"]["objective_score"] = score_decision(payload, data.get("preferences", {}))
+                payload["status"] = "needs_input" if payload["evidence"].get("brain_conflicts") else ("suppressed" if payload["evidence"].get("knowledge_blockers") else ("shadow" if payload["confidence"] >= threshold else "needs_input"))
+                payload["evidence"]["objective_score"] = score_decision(payload, frame["preferences"])
                 key = hashlib.sha256(json.dumps([payload["category"], payload["area_id"], payload["title"], sorted(payload["entity_ids"]),
                                                 payload["proposed_action"], payload["evidence"].get("modes")]).encode()).hexdigest()[:24]
                 previous = next((d for d in reversed(journal) if d.get("key") == key), None)
@@ -211,6 +217,9 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 if "entity_ids" not in question:
                     question["entity_ids"] = decisions_by_id.get(question.get("decision_id"), {}).get("entity_ids", [])
             questions, new_questions = merge_questions(data.setdefault("questions", []), latest, now)
+            for current_decision in latest:
+                remember(data, current_decision, now)
+            reconcile_questions(questions, frame, now)
             retire_removed_questions(questions, area_ids, entity_ids, now)
             new_questions = [q for q in new_questions if q.get("status") == "open"]
             data["questions"] = questions
@@ -251,6 +260,9 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
         )
         knowledge_coverage, knowledge_gaps = knowledge_overview(data)
         result = {"inventory": inventory, "knowledge_application": knowledge_application, "rooms": home_model(profiles, learning),
+                "brain": {"evaluated_at": now.isoformat(), "duration_ms": round((perf_counter()-started)*1000, 1),
+                          "counts": frame["counts"], "conflicts": frame["conflicts"], "decisions_evaluated": len(latest),
+                          "profiles_considered": len(profiles)},
                 "profiles": {p.entity_id: p.as_dict() for p in profiles}, "latest_decisions": latest,
                 "decision_count": len(journal), "contexts": contexts, "usage": usage,
                 "questions": [q for q in data.get("questions", []) if q.get("status") == "open"],

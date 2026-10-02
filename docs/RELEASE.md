@@ -1,3 +1,18 @@
+## E.S.T.E.R. 1.6.0 — Cervello, memoria condivisa ed esperienze
+
+- CERVELLO è la pagina iniziale: domande, file, insegnamenti, note aggiornabili, memoria conservata e previsioni nello stesso punto. Il menu principale contiene Cervello, Decisioni e CORE; le sezioni specialistiche sono nei dettagli.
+- Memoria di lavoro comune per valutazioni correnti, replay e scenari. Note a scadenza, aggiornamenti con storico, valori operativi di comfort/costo energia, provenienza nelle decisioni e gestione dei conflitti.
+- JSON v2 consente effetti espliciti e validati; TXT, Markdown e JSON v1 restano compatibili. Raccolta e ricevute distinguono file conservati e conoscenze attive.
+- Le domande di comfort già coperte dalla memoria si risolvono; una nota temporanea scaduta può riaprire il dubbio.
+- Riscontri Corretta/Parziale/Sbagliata alimentano una memoria duratura delle esperienze. I precedenti vengono confrontati con situazioni simili; le proposte con fiducia alta restano candidati da verificare.
+- Crescita descritta da conteggi reali, modelli, esperienze e tempi misurati. Ricerca del contesto AI nell'intera memoria valida, con budget, senza taglio alle ultime 40 note.
+
+La pagina mostra anche quando un'informazione è solo contesto. Non interpreta
+automaticamente ogni frase come una regola e non dimostra intelligenza superiore
+o risparmio reale. Previsioni e proposte restano locali e dipendono dai dati.
+Shadow Mode invariato, nessuna attuazione fisica. [Dettagli](CERVELLO.md).
+Aggiorna da HACS, riavvia Home Assistant e ricarica il pannello E.S.T.E.R.
+
 ## E.S.T.E.R. 1.5.3 — Memoria nelle decisioni correnti
 
 - Le note confermate in Altro (TXT, Markdown e testo libero) vengono collegate agli argomenti pertinenti senza riscrivere la memoria.

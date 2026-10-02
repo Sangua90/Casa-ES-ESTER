@@ -17,7 +17,7 @@ from homeassistant.helpers.storage import Store
 from .const import MAX_DECISIONS, STORAGE_KEY, STORAGE_VERSION
 
 _LOGGER = logging.getLogger(__name__)
-MEMORY_KEYS = ("knowledge", "knowledge_documents", "pending_teachings", "preferences", "classifications",
+MEMORY_KEYS = ("knowledge", "knowledge_documents", "pending_teachings", "preferences", "classifications", "brain_notes", "brain_experiences",
                "questions", "usage_profiles", "context_events", "flexible_loads", "safety_policies", "fallback_policies")
 
 
@@ -56,6 +56,8 @@ class EsterStorage:
             "usage_profiles": [],
             "questions": [],
             "knowledge": [],
+            "brain_notes": [],
+            "brain_experiences": [],
             "knowledge_documents": [],
             "pending_teachings": [],
             "safety_policies": {},

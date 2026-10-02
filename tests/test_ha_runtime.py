@@ -171,6 +171,37 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ServiceValidationError):
             await self.hass.services.async_call("ester", "import_question_file", {"file_json": json.dumps(exported), "confirm": True}, blocking=True, return_response=True)
 
+    async def test_shared_brain_changes_live_decisions_and_blocks_conflict(self):
+        from homeassistant.helpers import area_registry
+        from homeassistant.util import dt as dt_util
+        from custom_components.ester.storage import EsterStorage
+        from custom_components.ester.coordinator import EsterCoordinator
+        room = area_registry.async_get(self.hass).async_create("Studio")
+        self.hass.states.async_set("sensor.room_temp", "18", {"device_class":"temperature", "unit_of_measurement":"°C"})
+        self.hass.states.async_set("climate.room", "heat", {})
+        self.hass.states.async_set("binary_sensor.room_presence", "on", {"device_class":"occupancy"})
+        store = EsterStorage(self.hass)
+        store.data["classifications"] = {"sensor.room_temp":{"role":"temperature","area_id":room.id},
+            "climate.room":{"role":"climate","area_id":room.id},
+            "binary_sensor.room_presence":{"role":"presence","area_id":room.id}}
+        coordinator = EsterCoordinator(self.hass, None, store)
+        with patch.object(type(self.hass.services), "async_call", side_effect=AssertionError("Device services forbidden")):
+            first = await coordinator._async_update_data()
+            self.assertTrue(any(q["category"] == "climate" for q in first["questions"]))
+            store.data["brain_notes"] = [{"knowledge_id":"note1","source":"brain_note","statement":"Comfort temporaneo",
+                "area_id":room.id,"status":"active","effect":{"type":"comfort","value":22},
+                "expires_at":(dt_util.utcnow()+timedelta(hours=1)).isoformat()}]
+            second = await coordinator._async_update_data()
+            self.assertTrue(any(d["evidence"].get("target_c") == 22 for d in second["latest_decisions"]))
+            self.assertFalse(any("comfort" in q.get("prompt", "").lower() for q in second["questions"]))
+            self.assertGreaterEqual(second["brain"]["duration_ms"], 0)
+            store.data["brain_notes"].append({**store.data["brain_notes"][0], "knowledge_id":"note2", "effect":{"type":"comfort","value":20}})
+            third = await coordinator._async_update_data()
+            self.assertTrue(any(d["status"] == "needs_input" and d["evidence"].get("brain_conflicts") for d in third["latest_decisions"]))
+        restored = EsterStorage(self.hass)
+        await restored.async_load()
+        self.assertEqual(len(restored.data["brain_notes"]), 2)
+
     async def test_removed_area_override_does_not_create_ghost_room(self):
         from homeassistant.helpers import area_registry
         from custom_components.ester.discovery import discover_entities

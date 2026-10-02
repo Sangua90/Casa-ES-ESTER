@@ -143,7 +143,7 @@ class EsterSummarySensor(EsterBaseSensor):
     """Compact UI summary, with full details available through get_summary."""
     _attr_name = "Summary"
     _attr_icon = "mdi:home-analytics"
-    _unrecorded_attributes = frozenset({"memory_protection", "knowledge_audit", "knowledge_application", "data_suggestions", "progress", "rooms", "contexts", "history", "usage", "thermal_models", "ventilation_models", "hot_water_models", "occupancy_models", "migration_readiness", "kpis", "autonomy_health", "anomalies", "last_replay", "last_scenario", "memory_versions", "daily_forecast", "decision_history", "usage_profile_items", "flexible_loads", "knowledge_items", "knowledge_coverage", "knowledge_gaps"})
+    _unrecorded_attributes = frozenset({"brain", "memory_protection", "knowledge_audit", "knowledge_application", "data_suggestions", "progress", "rooms", "contexts", "history", "usage", "thermal_models", "ventilation_models", "hot_water_models", "occupancy_models", "migration_readiness", "kpis", "autonomy_health", "anomalies", "last_replay", "last_scenario", "memory_versions", "daily_forecast", "decision_history", "usage_profile_items", "flexible_loads", "knowledge_items", "knowledge_coverage", "knowledge_gaps"})
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry, "summary")
@@ -155,7 +155,7 @@ class EsterSummarySensor(EsterBaseSensor):
     @property
     def extra_state_attributes(self):
         data = self.coordinator.data or {}
-        return {"memory_protection": data.get("memory_protection", {}),
+        return {"brain": data.get("brain", {}), "memory_protection": data.get("memory_protection", {}),
                 "knowledge_audit": data.get("knowledge_audit", []),
                 "knowledge_application": data.get("knowledge_application", []),
                 "data_suggestions": data.get("data_suggestions", []),

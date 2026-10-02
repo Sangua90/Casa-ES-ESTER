@@ -1,9 +1,10 @@
 # E.S.T.E.R.
-**Everything Seems Totally Easy, Right? — V1.4 Pre-Autonomy Shadow**
+**Everything Seems Totally Easy, Right? — V1.6 Cervello Shadow**
 
 E.S.T.E.R. osserva Home Assistant, costruisce un modello delle stanze e registra proposte spiegabili. **Non contiene un esecutore, non chiama servizi dei dispositivi e non può abilitare l'attuazione.**
 
 ## Cosa fa
+- Riunisce domande, file, note a scadenza, esperienze e previsioni nella pagina iniziale **CERVELLO**, con memoria condivisa nelle valutazioni. [Funzionamento e limiti del nucleo](docs/CERVELLO.md).
 - Scopre entità, aree e dispositivi; permette correzioni locali della classificazione.
 - Legge 24 ore di storico Recorder e 7 giorni di statistiche orarie quando disponibili, senza modificare il database.
 - Apprende trend e modelli locali: risposta termica delle stanze, efficacia ventilazione, comportamento ACS e probabilità d'uso degli spazi.

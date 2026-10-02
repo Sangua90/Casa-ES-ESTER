@@ -9,6 +9,7 @@ from datetime import datetime, UTC
 from uuid import uuid4
 
 from .language import KNOWLEDGE_DOMAINS, KNOWLEDGE_KINDS
+from .brain import validate_effect
 
 
 def document_collection(store: dict) -> dict:
@@ -71,7 +72,7 @@ async def prepare_documents(coordinator, documents: list) -> dict:
 
 def identity(item: dict) -> tuple:
     return (item.get("domain", "other"), item.get("area_id", ""),
-            " ".join((item.get("statement") or item.get("text") or "").casefold().split()))
+            " ".join((item.get("statement") or item.get("text") or "").casefold().split()), json.dumps(item.get("effect", {}), sort_keys=True))
 
 
 def parse_documents(files: list) -> list[dict]:
@@ -95,8 +96,8 @@ def parse_documents(files: list) -> list[dict]:
                 document = json.loads(content)
             except ValueError as err:
                 raise ValueError("JSON non valido: " + name) from err
-            if not isinstance(document, dict) or set(document) != {"format", "items"} or document["format"] != "ester-knowledge-v1":
-                raise ValueError("Usa il formato ester-knowledge-v1, non un backup della memoria.")
+            if not isinstance(document, dict) or set(document) != {"format", "items"} or document["format"] not in {"ester-knowledge-v1", "ester-knowledge-v2"}:
+                raise ValueError("Usa il formato ester-knowledge-v1 o v2, non un backup della memoria.")
             rows = document["items"]
         elif suffix in {"txt", "md"}:
             rows = [{"statement": p.strip(), "domain": "other", "kind": "fact"}
@@ -107,7 +108,7 @@ def parse_documents(files: list) -> list[dict]:
             raise ValueError("Il file non contiene informazioni.")
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
         for row in rows:
-            if not isinstance(row, dict) or set(row) - {"statement", "domain", "kind", "area_id"}:
+            if not isinstance(row, dict) or set(row) - {"statement", "domain", "kind", "area_id", "effect"}:
                 raise ValueError("Ogni informazione può contenere solo statement, domain, kind e area_id.")
             statement = row.get("statement")
             if not isinstance(statement, str) or not 1 <= len(statement.strip()) <= 1000:
@@ -121,6 +122,10 @@ def parse_documents(files: list) -> list[dict]:
             items.append({"statement": statement.strip(), "domain": domain, "kind": kind,
                           "area_id": area, "source_file": name, "source_digest": digest,
                           "confidence": 0.5})
+            if "effect" in row:
+                if suffix != "json" or document["format"] != "ester-knowledge-v2":
+                    raise ValueError("Gli effetti strutturati richiedono ester-knowledge-v2.")
+                items[-1]["effect"] = validate_effect(row["effect"], area)
             if len(items) > 100:
                 raise ValueError("Carica al massimo 100 informazioni alla volta.")
     return items

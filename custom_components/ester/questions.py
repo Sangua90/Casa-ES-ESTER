@@ -24,6 +24,11 @@ def _friendly_question(decision: dict, prompt: str) -> dict:
     }
 
     p = prompt.lower()
+    if "conflitto" in p:
+        base.update(display_title="Informazioni in conflitto nel cervello",
+                    why_asking="Due valori attivi sono incompatibili; la proposta resta da chiarire.",
+                    answer_hint="Nel Cervello aggiorna o ritira le note superate. Una risposta generica non elimina due note ancora attive.")
+        return base
     if category == "climate" and "sensore" in p:
         base.update({
             "display_title": f"Termometro di {area_label}",

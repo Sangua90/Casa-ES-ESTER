@@ -27,6 +27,9 @@ from .const import VERSION
 from .language_pipeline import interpret_and_store
 from .language import store_teaching_items
 from .knowledge_files import prepare_documents, append_documents
+from .brain import working_memory, validate_effect
+from .experiences import remember
+from .language import KNOWLEDGE_DOMAINS
 from .snapshots import create_snapshot, restore_snapshot, portable_memory
 from .replay import run_historical_replay
 from .scenario import simulate_scenario
@@ -86,12 +89,16 @@ def register_services(hass):
                              if d["decision_id"] == call.data["decision_id"]), None)
             if decision is None:
                 raise ServiceValidationError("Unknown or expired decision")
+            current = next((d for d in (getattr(coordinator, "data", None) or {}).get("latest_decisions", [])
+                            if d["decision_id"] == decision["decision_id"]), decision)
             feedback = {**dict(call.data), "feedback_id": str(uuid4()), "created_at": dt_util.utcnow().isoformat(),
                         "category": decision["category"]}
             # Repeated feedback replaces an earlier rating instead of multiplying its weight.
             coordinator.storage.data["feedback"] = [f for f in coordinator.storage.data["feedback"]
                                                     if f["decision_id"] != decision["decision_id"]]
             decision["feedback"] = feedback
+            current["feedback"] = feedback
+            remember(coordinator.storage.data, current, dt_util.utcnow())
             await coordinator.storage.add_feedback(feedback)
         hass.bus.async_fire(EVENT_FEEDBACK, feedback)
         await coordinator.async_request_refresh()
@@ -288,6 +295,97 @@ def register_services(hass):
         except (ValueError, TypeError) as err:
             raise ServiceValidationError(str(err)) from None
 
+    async def get_brain(call):
+        coordinator = runtime()
+        profiles = discover_entities(hass, coordinator.storage.data["classifications"])
+        async with coordinator.storage.lock:
+            frame = working_memory(coordinator.storage.data, profiles, dt_util.utcnow())
+            current = getattr(coordinator, "data", None) or {}
+            frame["evaluation"] = current.get("brain", {})
+            frame["documents"] = {"count": len(coordinator.storage.data.get("knowledge_documents", [])),
+                                  "bytes": sum(len(d.get("content", "").encode("utf-8")) for d in coordinator.storage.data.get("knowledge_documents", []))}
+            frame["questions"] = coordinator.storage.data.get("questions", [])
+            frame["models"] = {name: len(current.get(name, {})) for name in ("thermal_models", "occupancy_models", "hot_water_models", "ventilation_models")}
+            frame["forecast"] = current.get("daily_forecast", {})
+            frame["latest"] = current.get("latest_decisions", [])
+            for row in frame["records"]:
+                row["used_in_latest"] = [d["decision_id"] for d in frame["latest"]
+                    if any(k.get("knowledge_id") == row.get("knowledge_id") for k in
+                           (d.get("evidence", {}).get("knowledge_context", []) + d.get("evidence", {}).get("brain_preferences", [])))]
+            frame["shadow_mode"] = True
+            frame["device_action"] = False
+            cases = coordinator.storage.data.get("brain_experiences", [])
+            frame["experiences"] = {"total": len(cases), "confirmed": sum(c.get("rating") == "correct" for c in cases),
+                                    "wrong": sum(c.get("rating") == "wrong" for c in cases),
+                                    "partial": sum(c.get("rating") == "partial" for c in cases),
+                                    "unverified": sum(not c.get("rating") for c in cases), "cases": cases}
+            return frame
+
+    async def save_brain_note(call):
+        coordinator = runtime()
+        if not call.data["statement"].strip():
+            raise ServiceValidationError("Scrivi il contenuto della nota.")
+        now = dt_util.utcnow()
+        area = call.data.get("area_id", "")
+        if area:
+            from homeassistant.helpers import area_registry
+            if area_registry.async_get(hass).async_get_area(area) is None:
+                raise ServiceValidationError("Scegli una stanza presente in Home Assistant.")
+        expires = call.data.get("expires_at")
+        if expires:
+            end = dt_util.parse_datetime(expires)
+            if end is None or end.tzinfo is None or end <= now:
+                raise ServiceValidationError("La scadenza deve essere futura e includere il fuso orario.")
+        effect = call.data.get("effect")
+        if effect:
+            try:
+                effect = validate_effect(effect, area)
+            except ValueError as err:
+                raise ServiceValidationError(str(err)) from None
+        note = {"knowledge_id": str(uuid4()), "statement": call.data["statement"], "domain": call.data.get("domain", "other"),
+                "area_id": area, "source": "brain_note", "status": "active", "kind": "context",
+                "scope": "temporary" if expires else "persistent", "starts_at": now.isoformat(),
+                "expires_at": expires, "mode": call.data.get("mode", "normal"), "created_at": now.isoformat()}
+        if effect:
+            note["effect"] = effect
+            note["kind"] = "preference"
+        async with coordinator.storage.lock:
+            previous = deepcopy(coordinator.storage.data)
+            notes = coordinator.storage.data.setdefault("brain_notes", [])
+            if len(notes) >= 1000:
+                raise ServiceValidationError("Massimo 1000 note conservate; nessuna nota è stata cancellata.")
+            replaces = call.data.get("replaces_id")
+            if replaces:
+                old = next((n for n in notes if n["knowledge_id"] == replaces), None)
+                if old is None or old.get("status") != "active":
+                    raise ServiceValidationError("Nota da aggiornare non trovata.")
+                old.update(status="superseded", superseded_by=note["knowledge_id"])
+                note["supersedes"] = replaces
+            notes.append(note)
+            try:
+                await coordinator.storage.async_save()
+            except Exception:
+                coordinator.storage.data.clear(); coordinator.storage.data.update(previous)
+                raise
+        await coordinator.async_request_refresh()
+        return {"saved": True, "note": note, "device_action": False}
+
+    async def retract_brain_note(call):
+        coordinator = runtime()
+        async with coordinator.storage.lock:
+            notes = coordinator.storage.data.get("brain_notes", [])
+            note = next((n for n in notes if n["knowledge_id"] == call.data["knowledge_id"]), None)
+            if note is None:
+                raise ServiceValidationError("Nota non trovata.")
+            previous = deepcopy(note)
+            note.update(status="retracted", updated_at=dt_util.utcnow().isoformat())
+            try:
+                await coordinator.storage.async_save()
+            except Exception:
+                note.clear(); note.update(previous)
+                raise
+        await coordinator.async_request_refresh()
+
     async def confirm_teaching(call):
         coordinator=runtime()
         proposal_id=call.data["proposal_id"]
@@ -441,6 +539,16 @@ def register_services(hass):
         allowed = set(portable_memory(coordinator.storage.data))
         if any(key not in allowed and key != "version" for key in incoming):
             raise ServiceValidationError("Import contains unsupported keys")
+        for key in ("brain_notes", "brain_experiences"):
+            if key in incoming and (not isinstance(incoming[key], list) or
+                                    any(not isinstance(row, dict) or not row.get("knowledge_id" if key == "brain_notes" else "decision_id") for row in incoming[key])):
+                raise ServiceValidationError("Memoria del cervello non valida")
+        for row in incoming.get("brain_notes", []):
+            if row.get("effect"):
+                try:
+                    validate_effect(row["effect"], row.get("area_id", ""))
+                except ValueError as err:
+                    raise ServiceValidationError(str(err)) from None
         async with coordinator.storage.lock:
             checkpoint(coordinator, "Prima dell'import memoria", "Import JSON")
             for key in allowed:
@@ -520,6 +628,12 @@ def register_services(hass):
             vol.Required("rating"): vol.In(["correct", "wrong", "partial"]), vol.Optional("comment"): TEXT}),
         "classify_entity": (classify, {vol.Required("entity_id"): cv.entity_id,
             vol.Required("role"): vol.In(ROLES), vol.Optional("area_id"): SHORT}),
+        "get_brain": (get_brain, {}),
+        "save_brain_note": (save_brain_note, {vol.Required("statement"): TEXT,
+            vol.Optional("domain", default="other"): vol.In(KNOWLEDGE_DOMAINS), vol.Optional("area_id", default=""): cv.string,
+            vol.Optional("expires_at"): cv.string, vol.Optional("replaces_id"): SHORT,
+            vol.Optional("mode", default="normal"): vol.In(MODES), vol.Optional("effect"): dict}),
+        "retract_brain_note": (retract_brain_note, {vol.Required("knowledge_id"): SHORT}),
         "set_preference": (preference, {vol.Required("key"): SHORT, vol.Required("value"): vol.Coerce(float)}),
         "set_usage_profile": (set_usage_profile, {
             vol.Optional("profile_id"): SHORT,
@@ -588,4 +702,4 @@ def register_services(hass):
     }
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
-            supports_response=SupportsResponse.ONLY if name in {"export_learning_report", "export_question_file", "import_question_file", "get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "preview_knowledge_files", "confirm_teaching", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)
+            supports_response=SupportsResponse.ONLY if name in {"get_brain", "save_brain_note", "export_learning_report", "export_question_file", "import_question_file", "get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "preview_knowledge_files", "confirm_teaching", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)

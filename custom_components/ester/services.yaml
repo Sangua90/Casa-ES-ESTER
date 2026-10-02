@@ -1,3 +1,43 @@
+get_brain:
+  name: "Leggi il cervello"
+  description: "Memoria condivisa, validità, fonti, esperienze e valutazioni Shadow."
+save_brain_note:
+  name: "Salva una nota nel cervello"
+  description: "Conserva una nota con scadenza opzionale o aggiorna una nota precedente. Comfort e costo energia sono valori espliciti, senza attuazioni."
+  fields:
+    statement:
+      required: true
+      selector:
+        text:
+          multiline: true
+    domain:
+      selector:
+        text: {}
+    area_id:
+      selector:
+        text: {}
+    expires_at:
+      description: "Data ISO con fuso orario; omettere per una nota persistente."
+      selector:
+        text: {}
+    mode:
+      selector:
+        text: {}
+    effect:
+      description: "Oggetto type/value: comfort (area obbligatoria, season opzionale) oppure energy_price (€/kWh, casa intera)."
+      selector:
+        object: {}
+    replaces_id:
+      selector:
+        text: {}
+retract_brain_note:
+  name: "Ritira una nota dal cervello"
+  description: "Esclude la nota dalle nuove valutazioni e la conserva nello storico."
+  fields:
+    knowledge_id:
+      required: true
+      selector:
+        text: {}
 add_context:
   name: "Aggiungi contesto"
   description: "Contesto temporaneo interno; scadenza predefinita 24 ore."

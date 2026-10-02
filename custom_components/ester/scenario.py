@@ -20,6 +20,13 @@ def simulate_scenario(
     comfort_delta_c: float = 0.0,
     energy_price_multiplier: float = 1.0,
 ) -> dict:
+    data = deepcopy(data)
+    for row in data.get("knowledge", []) + data.get("brain_notes", []):
+        effect = row.get("effect") or {}
+        if effect.get("type") == "comfort" and (area_id is None or row.get("area_id") == area_id):
+            effect["value"] += float(comfort_delta_c)
+        elif effect.get("type") == "energy_price":
+            effect["value"] *= float(energy_price_multiplier)
     preferences = deepcopy(data.get("preferences", {}))
     for key in list(preferences):
         if key.startswith(("comfort:", "seasonal_comfort:")):
@@ -52,6 +59,7 @@ def simulate_scenario(
         data.get("ventilation_models", {}), data.get("hot_water_models", {}),
         data.get("occupancy_models", {}), data.get("energy_runtime", {}),
         knowledge=data.get("knowledge", []),
+        memory=data,
     )
     return {
         "mode": mode,

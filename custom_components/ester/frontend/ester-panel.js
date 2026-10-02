@@ -4,7 +4,10 @@ class EsterPanel extends HTMLElement {
     this.attachShadow({mode: "open"});
     this._hass = null;
     this._busy = false;
-    this._tab = "overview";
+    this._tab = "brain";
+    this._brain = null;
+    this._brainLoading = false;
+    this._brainError = "";
     this._decisionCategory = "all";
     this._advanced = false;
     this._notice = "";
@@ -28,6 +31,23 @@ class EsterPanel extends HTMLElement {
   connectedCallback() { this.render(); }
 
   refreshDataOnly() {
+    if(this._tab === "brain") {
+      const stats=this.shadowRoot?.querySelector("#brain-stats");
+      const live=this.summary().brain;
+      if(this._brain && live) {
+        const changed=live.evaluated_at!==this._brain.evaluation?.evaluated_at;
+        this._brain.evaluation=live;
+        if(live.counts)this._brain.counts=live.counts;
+        const questions=this.shadowRoot?.querySelector("#brain-questions");
+        const items=this.state("sensor.e_s_t_e_r_questions")?.attributes?.items;
+        if(changed && items && questions && !questions.contains(this.shadowRoot.activeElement)) {
+          this._brain.questions=items;
+          questions.innerHTML=this.groupedQuestionCards();this.bind();
+        }
+      }
+      if(stats) stats.innerHTML=this.brainStats();
+      if(!this._brain && !this._brainLoading && !this._brainError) this.loadBrain();
+    }
     // Preserve scroll position and unsent answers during background updates.
     const progress = this.shadowRoot?.querySelector("#ester-progress");
     if (progress) {
@@ -54,7 +74,8 @@ class EsterPanel extends HTMLElement {
         container.querySelectorAll("[data-decision-id]").forEach(card=>card.querySelectorAll("details").forEach((detail,index)=>{if(detail.open) expanded.add(card.dataset.decisionId+":"+index);}));
         container.innerHTML = markup; this._decisionMarkup = markup;
         container.querySelectorAll("[data-decision-id]").forEach(card=>card.querySelectorAll("details").forEach((detail,index)=>{detail.open=expanded.has(card.dataset.decisionId+":"+index);}));
-        container.querySelectorAll("[data-open-tab]").forEach(button=>button.onclick=()=>{this._tab=button.dataset.openTab;this.render();});
+        container.querySelectorAll("[data-open-tab]").forEach(button=>button.onclick=()=>{this._tab=["questions","teach"].includes(button.dataset.openTab)?"brain":button.dataset.openTab;this.render();});
+        container.querySelectorAll("[data-decision-feedback]").forEach(button=>button.onclick=()=>this.decisionFeedback(button.dataset.decisionFeedback,button.dataset.rating));
       }
     }
   }
@@ -131,7 +152,7 @@ class EsterPanel extends HTMLElement {
       area
     };
   }
-  questions() { return this.state("sensor.e_s_t_e_r_questions")?.attributes?.items || []; }
+  questions() { return this._tab === "brain" && this._brain ? (this._brain.questions||[]).filter(q=>q.status==="open") : this.state("sensor.e_s_t_e_r_questions")?.attributes?.items || []; }
   migration() { return this.summary().migration_readiness || {}; }
   prefs() { return this.summary().preferences || {}; }
 
@@ -194,6 +215,7 @@ class EsterPanel extends HTMLElement {
       this._notice = response?.summary || "Conoscenze salvate.";
       if (this._uploadProgress === 100) this.updateUploadStatus(this._notice);
       await this.loadFileCollection();
+      if(this._tab === "brain") await this.loadBrain();
       try { await this._hass.callService("ester","evaluate",{}); }
       catch (_) { this._notice += " La schermata si aggiornerà alla prossima valutazione."; }
     } catch (err) {
@@ -232,6 +254,7 @@ class EsterPanel extends HTMLElement {
         ? "Capito: " + response.interpretation.summary
         : "Risposta registrata.";
       await this._hass.callService("ester","evaluate",{});
+      if(this._tab === "brain") await this.loadBrain();
     } catch (err) {
       this._notice = "Risposta non registrata: " + (err?.message || "errore");
     } finally {
@@ -503,7 +526,10 @@ class EsterPanel extends HTMLElement {
         </div>
         <div class="decision-section primary"><span>LA MIA PROPOSTA</span><strong>${this.esc(d.proposed_action)}</strong></div>
         <details class="decision-reason"><summary>Perché questa proposta?</summary><p>${this.esc(d.reasoning)}</p></details>
+        ${d.decision_id ? `<details><summary>Dai un riscontro e alimenta il cervello</summary><p>Valuta la proposta, anche se non è stata eseguita. Il riscontro non viene presentato come risparmio misurato.</p>${[["correct","CORRETTA"],["partial","PARZIALE"],["wrong","SBAGLIATA"]].map(([rating,label])=>`<button data-decision-feedback="${this.esc(d.decision_id)}" data-rating="${rating}" ${this._busy?"disabled":""}>${label}</button>`).join("")}</details>`:""}
         ${(d.evidence?.knowledge_context || []).length ? '<details><summary>Memoria considerata</summary>'+d.evidence.knowledge_context.map(k=>'<p>'+this.esc(k.statement)+'<br><small>'+this.esc(k.application === "constraint_applied" ? "Vincolo applicato: proposta sospesa" : "Solo contesto: nessuna regola automatica ricavata")+'</small></p>').join("")+'</details>' : ''}
+        ${(d.evidence?.brain_preferences||[]).length ? '<details><summary>Valori dalla memoria condivisa</summary>'+d.evidence.brain_preferences.map(p=>'<p>'+this.esc(p.key)+' = '+this.esc(String(p.value))+' · '+this.esc(p.source_file||p.source||"preferenza")+'</p>').join("")+'</details>':""}
+        ${(d.evidence?.similar_experiences||[]).length ? '<details><summary>Esperienze in situazioni simili</summary>'+d.evidence.similar_experiences.map(c=>'<p>'+this.esc(c.proposed_action)+' · riscontro: '+this.esc({correct:"corretta",wrong:"sbagliata",partial:"parziale"}[c.rating]||c.rating)+'</p>').join("")+'<small>Confronto con dati, stanza e obiettivo simili. La proposta viene rivalutata; il precedente non dimostra un risultato futuro.</small></details>':""}
         <div class="plain-explain">${this.esc(this.confidenceMeaning(d.confidence))}</div>
         ${d.evidence?.knowledge_followup ? `<p class="hint">${this.esc(d.evidence.knowledge_followup)}</p>` : ""}
         ${d.evidence?.question ? '<button data-open-tab="questions">RISPONDI ALLE DOMANDE</button>' : ''}
@@ -839,7 +865,7 @@ class EsterPanel extends HTMLElement {
       if (!response.ok) throw Error(collection.error || `Errore ${response.status}`);
       this._fileCollection = collection;
     } catch (error) { this._collectionError = "Raccolta non disponibile: " + (error.message || "errore di connessione"); }
-    finally { this._loadingCollection = false; if (this._tab === "teach") this.render(); }
+    finally { this._loadingCollection = false; if (["brain","teach"].includes(this._tab)) this.render(); }
   }
 
   fileCollectionView() {
@@ -905,6 +931,7 @@ class EsterPanel extends HTMLElement {
       this._knowledgeFiles = [];
       this.updateUploadStatus(`${result.uploaded_files.length} file salvati e conservati nella memoria di Home Assistant. Li trovi nella raccolta. Premi SALVA NELLA MEMORIA per attivare le conoscenze.`, 100);
       this._notice = this._uploadStatus;
+      if(this._tab === "brain") await this.loadBrain();
     } catch (err) {
       this.updateUploadStatus("Caricamento non confermato: " + (err?.message || "errore"), 0);
       this._notice = this._uploadStatus;
@@ -921,7 +948,93 @@ class EsterPanel extends HTMLElement {
     URL.revokeObjectURL(url);
   }
 
-  teachView() {
+  async decisionFeedback(id, rating) {
+    if(this._busy)return; this._busy=true;
+    try {
+      await this._hass.callService("ester","add_feedback",{decision_id:id,rating});
+      this._notice="Riscontro conservato nel cervello. Verrà confrontato con le situazioni future.";
+      this._brain=null;
+    } catch(error){this._notice="Riscontro non salvato: "+error.message;}
+    finally{this._busy=false;this.render();}
+  }
+
+  async loadBrain() {
+    if (this._brainLoading || !this._hass) return;
+    this._brainLoading = true; this._brainError = "";
+    try {
+      const result = await this._hass.callWS({type:"call_service",domain:"ester",service:"get_brain",service_data:{},return_response:true});
+      this._brain = result.response || result;
+    } catch (error) { this._brainError = error.message || "Memoria non disponibile"; }
+    finally { this._brainLoading = false; if(this._tab === "brain") this.render(); }
+  }
+
+  async saveBrainNote() {
+    if(this._busy) return;
+    const value=id=>this.shadowRoot.querySelector("#brain-"+id)?.value || "";
+    const data={statement:value("note"),domain:value("domain"),area_id:value("area"),mode:value("mode")};
+    const hours=Number(value("duration"));
+    if(hours) data.expires_at=new Date(Date.now()+hours*3600000).toISOString();
+    const effect=value("effect");
+    if(effect) {
+      if(!value("value").trim()) {this._notice="Indica il valore numerico da applicare.";this.render();return;}
+      data.effect={type:effect,value:Number(value("value"))}; if(effect==="comfort") data.effect.season=value("season");
+    }
+    if(this._editingBrainNote) data.replaces_id=this._editingBrainNote;
+    this._busy=true;
+    try {
+      await this._hass.callWS({type:"call_service",domain:"ester",service:"save_brain_note",service_data:data,return_response:true});
+      this._brainForm={}; this._editingBrainNote=null;
+      this.shadowRoot.querySelectorAll("[data-brain-field]").forEach(field=>{if(field.tagName==="TEXTAREA")field.value="";});
+      this._notice="Nota conservata nella memoria. Verifico come viene applicata alle decisioni.";
+      await this.loadBrain();
+    } catch(error) {this._notice="Salvataggio non confermato: "+error.message;}
+    finally {this._busy=false;this.render();}
+  }
+
+  brainStats() {
+    const b=this._brain, c=b?.counts||{}, e=b?.evaluation||{};
+    const metric=(label,value)=>`<div><b>${this.esc(String(value ?? "…"))}</b><span>${label}</span></div>`;
+    return `<div class="simple-status-grid brain-metrics">${metric("Tasselli attivi",c.active)}${metric("File conservati",b?.documents?.count)}${metric("Risposte conservate",c.answered_questions)}${metric("Modelli dallo storico",b ? Object.values(b.models||{}).reduce((n,v)=>n+v,0):undefined)}</div>
+      <p role="status">${this._brainLoading ? "Verifica della memoria in corso…" : e.evaluated_at ? `Ultima valutazione: ${this.esc(new Date(e.evaluated_at).toLocaleString("it-IT"))} · ${e.decisions_evaluated} proposte · ${e.duration_ms} ms (lettura storico inclusa).` : "In attesa della prima valutazione misurata."}</p>
+      <p>${c.preferences ?? "…"} preferenze · ${c.routines ?? "…"} abitudini · ${c.expired ?? "…"} note scadute · ${c.conflicts ?? "…"} conflitti. ${b?.documents?.bytes ?? "…"} byte di file conservati.</p>`;
+  }
+
+  brainView() {
+    const b=this._brain;
+    const states={active:"ATTIVA",expired:"SCADUTA",superseded:"AGGIORNATA",retracted:"RITIRATA",scheduled:"FUTURA"};
+    const usage={context_only:"Contesto disponibile: non implica una regola operativa",preference_applied:"Valore operativo disponibile al motore",conflict:"Conflitto: decisioni coinvolte da chiarire",inactive:"Esclusa dalla valutazione",needs_review:"Da verificare",explicit_preference_priority:"Prevale la preferenza già confermata",temporary_note_priority:"Prevale la nota aggiornata"};
+    const rooms=Object.entries(this.summary().rooms||{});
+    return this.viewHeader("MEMORIA / RAGIONAMENTO","CERVELLO","Alimenta la memoria della casa e verifica come entra nelle decisioni.",String(b?.counts?.active ?? "…"),"TASSELLI ATTIVI")+`
+      <article class="control"><div id="brain-stats">${this.brainStats()}</div><button id="brain-refresh" ${this._brainLoading?"disabled":""}>VERIFICA MEMORIA E VALUTAZIONI</button>${this._brainError?`<p role="alert">${this.esc(this._brainError)}</p>`:""}<p>Valutazioni locali su sensori, memoria e previsioni. Verifica le motivazioni e dai riscontri per migliorarle. Shadow Mode: nessuna attuazione fisica.</p><button data-tab="decisions">VEDI COME STA DECIDENDO</button></article>
+      <details class="control" open><summary>DOMANDE DA CHIARIRE</summary><div id="brain-questions">${this.groupedQuestionCards()}</div><details><summary>Rispondi con un file preparato con ChatGPT</summary>${this.questionFileControls()}</details></details>
+      <details class="control"><summary>FILE E INSEGNAMENTI</summary>${this.teachView(true)}</details>
+      <details class="control"><summary>INFORMAZIONI CHE CAMBIANO NEL TEMPO</summary><p>Una nota può avere una scadenza. Per modificare comfort o costo energia, indica anche il valore: una frase libera rimane contesto finché non viene interpretata e confermata.</p>
+        <label>Nota<textarea id="brain-note" data-brain-field placeholder="Per esempio: questa settimana lavoriamo da casa"></textarea></label>
+        <label>Argomento<select id="brain-domain" data-brain-field>${["other","presence","climate","energy","lighting","hot_water","ventilation"].map(v=>`<option value="${v}">${this.categoryLabel(v)}</option>`).join("")}</select></label>
+        <label>Stanza<select id="brain-area" data-brain-field><option value="">Tutta la casa</option>${rooms.map(([id,r])=>`<option value="${this.esc(id)}">${this.esc(r.name||id)}</option>`).join("")}</select></label>
+        <label>Validità<select id="brain-duration" data-brain-field><option value="24">24 ore</option><option value="1">1 ora</option><option value="168">7 giorni</option><option value="0">Fino al prossimo aggiornamento manuale</option></select></label>
+        <label>Situazione<select id="brain-mode" data-brain-field>${["normal","guests","vacation","work_from_home","illness"].map(v=>`<option value="${v}">${this.esc(v)}</option>`).join("")}</select></label>
+        <label>Valore da applicare<select id="brain-effect" data-brain-field><option value="">Solo contesto</option><option value="comfort">Temperatura desiderata (°C, stanza obbligatoria)</option><option value="energy_price">Costo energia (€/kWh, tutta la casa)</option></select></label>
+        <label>Valore numerico<input id="brain-value" data-brain-field type="number" step="0.01" inputmode="decimal"></label>
+        <label>Stagione per il comfort<select id="brain-season" data-brain-field><option value="all">Sempre</option><option value="winter">Inverno</option><option value="summer">Estate</option><option value="shoulder">Mezza stagione</option></select></label>
+        <button id="brain-note-save" ${this._busy?"disabled":""}>${this._editingBrainNote?"SALVA AGGIORNAMENTO":"SALVA NOTA NELLA MEMORIA"}</button>
+      </details>
+      <details class="control"><summary>MEMORIA CONSERVATA · ${b?.counts?.total ?? "…"} tasselli</summary><p>Ogni fonte conserva origine e validità. Le note aggiornate restano nello storico; quelle scadute non influenzano nuove valutazioni.</p>${(b?.records||[]).map(r=>`<div class="knowledge-row"><b>${this.esc(r.statement)}</b><span>${states[r.memory_status]||this.esc(r.memory_status)} · ${this.esc(r.source_file||r.source||"insegnamento")}</span><small>${usage[r.application]||this.esc(r.application)}${r.expires_at?" · scadenza "+this.esc(new Date(r.expires_at).toLocaleString("it-IT")):""}${r.review_reason?" · "+this.esc(r.review_reason):""}</small>${r.source==="brain_note"&&r.memory_status==="active"?`<button data-brain-edit="${this.esc(r.knowledge_id)}">AGGIORNA</button><button data-brain-retract="${this.esc(r.knowledge_id)}">RITIRA</button>`:""}</div>`).join("")||"<p>Nessun tassello conservato.</p>"}</details>`;
+  }
+
+  brainExperiencesView() {
+    const e=this._brain?.experiences||{};
+    return `<details class="control"><summary>ESPERIENZE E SOLUZIONI CONSERVATE · ${e.total??"…"}</summary>
+      <p>${e.confirmed??0} confermate corrette da te · ${e.wrong??0} sbagliate · ${e.partial??0} parziali · ${e.unverified??0} proposte con fiducia alta ancora da verificare.</p>
+      <p>I precedenti restano in memoria e vengono cercati nelle situazioni simili. Ogni nuova proposta viene rivalutata con i dati attuali. La fiducia prevista e il successo dimostrato rimangono distinti.</p>
+      ${(e.cases||[]).map(c=>`<div class="knowledge-row"><b>${this.esc(c.proposed_action)}</b><span>${this.esc(this.roomName(c.area_id))} · ${this.esc(c.rating?{correct:"Confermata corretta",wrong:"Segnalata sbagliata",partial:"Parzialmente corretta"}[c.rating]:"Fiducia alta: esito da verificare")}</span><small>${this.esc(new Date(c.updated_at).toLocaleString("it-IT"))}</small></div>`).join("")}
+      </details><details class="control"><summary>VALORI CONDIVISI E USO NELLE ULTIME VALUTAZIONI</summary>
+      ${Object.entries(this._brain?.preferences||{}).map(([k,v])=>`<p>${this.esc(k)}: ${this.esc(String(v))}</p>`).join("")}
+      ${(this._brain?.records||[]).filter(r=>r.used_in_latest?.length).map(r=>`<p>${this.esc(r.statement)} · considerata in ${r.used_in_latest.length} proposte recenti.</p>`).join("")||"<p>Nessun uso nelle proposte recenti verificato.</p>"}
+      </details><details class="control"><summary>PREVISIONI E MODELLI LOCALI</summary>${this.forecastCard()}<section class="grid">${this.learningCards()}</section></details>`;
+  }
+
+  teachView(compact = false) {
     const s=this.summary();
     const knowledge=s.knowledge_items || [];
     const coverage=s.knowledge_coverage || {};
@@ -931,7 +1044,7 @@ class EsterPanel extends HTMLElement {
     const labels={presence:"PRESENZA / FAMIGLIA",climate:"CLIMA",lighting:"LUCI",hot_water:"ACQUA CALDA",energy:"ENERGIA / FV / BATTERIA",ventilation:"VENTILAZIONE",security:"SICUREZZA",appliances:"ELETTRODOMESTICI",rooms:"STANZE",other:"ALTRO"};
     const grouped={}; for(const k of knowledge){(grouped[k.domain||k.category||"other"] ||= []).push(k);}
     return `
-      ${this.viewHeader("TEACH / 04","INSEGNA","Raccontami liberamente come vivete la casa. Ti mostro cosa ho capito prima di ricordarlo.",String(knowledge.length),"CONOSCENZE")}
+      ${compact ? "" : this.viewHeader("TEACH / 04","INSEGNA","Raccontami liberamente come vivete la casa. Ti mostro cosa ho capito prima di ricordarlo.",String(knowledge.length),"CONOSCENZE")}
       <section class="command-deck teach-main">
         <article class="control">
           <h3>Note per E.S.T.E.R. · carica un file</h3>
@@ -952,7 +1065,7 @@ class EsterPanel extends HTMLElement {
         <p>Non devi usare parole precise. Puoi parlare di più cose insieme: luci, clima, orari, persone, eccezioni e priorità.</p>
         <div class="command-input"><textarea id="teach" placeholder="Per esempio: «La sera in salotto vogliamo circa 21 gradi. Se non c'è nessuno non serve scaldarlo. Le luci esterne servono quando rientriamo col buio…»"></textarea><button class="mic-btn big-mic" data-mic="teach">◉ PARLA</button><button id="teach-send">${this._busy?"...":"CAPIRE"}</button></div>
       </section>
-      ${proposal?.source === "knowledge_files" ? `<article class="control teach-review"><h3>File ricevuto e verificato</h3><p>${(proposal.items || []).length} nuove informazioni pronte per il salvataggio.</p><button id="teach-confirm">SALVA NELLA MEMORIA</button><button id="teach-discard">ANNULLA SALVATAGGIO</button><p>Il contenuto non viene mostrato. Dopo il salvataggio, le note saranno conoscenze attive di E.S.T.E.R.</p></article>` : proposal ? `<h2 class="section-title">QUELLO CHE HO CAPITO</h2><article class="control teach-review"><p>${this.esc(proposal.summary||"Controlla questi punti.")}</p><div class="knowledge-list">${(proposal.items||[]).map(x=>`<div class="knowledge-row"><b>${this.esc(labels[x.domain]||this.categoryLabel(x.domain))}</b><span>${this.esc(x.statement)}</span><small>${this.esc((x.kind||"informazione").replaceAll("_"," "))} · ${this.pct(x.confidence)}</small></div>`).join("")||'<div class="empty">Non ho estratto informazioni affidabili.</div>'}</div><div class="button-row"><button id="teach-confirm">CONFERMA E RICORDA</button><button id="teach-discard">SCARTA</button></div><p class="hint">Finché non confermi, queste informazioni non diventano conoscenze attive. I file caricati restano conservati nella raccolta.</p></article>` : ""}
+      ${proposal?.source === "knowledge_files" ? `<article class="control teach-review"><h3>File ricevuto e verificato</h3><p>${(proposal.items || []).length} nuove informazioni pronte per il salvataggio.</p><button id="teach-confirm">SALVA NELLA MEMORIA</button><button id="teach-discard">ANNULLA SALVATAGGIO</button><p>Dopo la conferma le note entrano nella memoria attiva.</p>${(proposal.items||[]).filter(x=>x.effect).map(x=>`<p>Valore operativo: ${this.esc(x.effect.type)} = ${this.esc(String(x.effect.value))} · ${this.esc(x.area_id||"casa")} · ${this.esc(x.effect.season||"sempre")}</p>`).join("")}</article>` : proposal ? `<h2 class="section-title">QUELLO CHE HO CAPITO</h2><article class="control teach-review"><p>${this.esc(proposal.summary||"Controlla questi punti.")}</p><div class="knowledge-list">${(proposal.items||[]).map(x=>`<div class="knowledge-row"><b>${this.esc(labels[x.domain]||this.categoryLabel(x.domain))}</b><span>${this.esc(x.statement)}</span><small>${this.esc((x.kind||"informazione").replaceAll("_"," "))} · ${this.pct(x.confidence)}</small></div>`).join("")||'<div class="empty">Non ho estratto informazioni affidabili.</div>'}</div><div class="button-row"><button id="teach-confirm">CONFERMA E RICORDA</button><button id="teach-discard">SCARTA</button></div><p class="hint">Finché non confermi, queste informazioni non diventano conoscenze attive. I file caricati restano conservati nella raccolta.</p></article>` : ""}
       <h2 class="section-title">COSA MI HAI INSEGNATO</h2>
       ${knowledge.length ? `<section class="grid">${domains.filter(d=>grouped[d]?.length).map(d=>{const items=grouped[d];const cv=coverage[d]||{};return `<article class="control knowledge-domain"><div class="eyebrow">${labels[d]}</div><h3>${items.length} informazioni</h3><p>${this.esc(cv.meaning|| "Ecco le informazioni conservate.")}</p>${items.slice(-5).map(x=>`<div class="knowledge-mini">${this.esc(x.statement||x.text||"")}</div>`).join("")}</article>`}).join("")}</section>` : '<article class="control"><h3>Cominciamo con una cosa semplice</h3><p>Raccontami come usate una stanza, oppure carica un file. Ti mostrerò quello che ho capito prima di salvarlo.</p></article>'}
       <h2 class="section-title">COSA MI MANCA</h2>
@@ -1094,11 +1207,32 @@ class EsterPanel extends HTMLElement {
     }
     const cancel = this.shadowRoot?.querySelector("#questions-cancel");
     if (cancel) cancel.onclick=()=>{this._questionImport=null;this._questionImportContent=null;this.render();};
-    this.shadowRoot?.querySelectorAll("[data-open-tab]").forEach(el => el.onclick=()=>{this._tab=el.dataset.openTab;this.render();});
+    this.shadowRoot?.querySelectorAll("[data-open-tab]").forEach(el => el.onclick=()=>{this._tab=["questions","teach"].includes(el.dataset.openTab)?"brain":el.dataset.openTab;this.render();});
     this.shadowRoot?.querySelectorAll("[data-tab]").forEach(el => {
       el.onclick = () => { this._tab = el.dataset.tab; this.render(); };
     });
     const modeToggle = this.shadowRoot?.querySelector("#mode-toggle");
+    const brainRefresh=this.shadowRoot?.querySelector("#brain-refresh");
+    this.shadowRoot?.querySelectorAll("[data-decision-feedback]").forEach(button=>button.onclick=()=>this.decisionFeedback(button.dataset.decisionFeedback,button.dataset.rating));
+    if(brainRefresh) brainRefresh.onclick=()=>this.loadBrain();
+    const brainSave=this.shadowRoot?.querySelector("#brain-note-save");
+    if(brainSave) brainSave.onclick=()=>this.saveBrainNote();
+    this.shadowRoot?.querySelectorAll("[data-brain-field]").forEach(field=>field.oninput=()=>{(this._brainForm ||= {})[field.id]=field.value;});
+    this.shadowRoot?.querySelectorAll("[data-brain-edit]").forEach(button=>button.onclick=()=>{
+      const row=this._brain?.records.find(r=>r.knowledge_id===button.dataset.brainEdit);
+      if(!row) return;
+      this._editingBrainNote=row.knowledge_id;
+      this._brainForm={"brain-note":row.statement,"brain-domain":row.domain,"brain-area":row.area_id,"brain-mode":row.mode,"brain-effect":row.effect?.type||"","brain-value":row.effect?.value??"","brain-season":row.effect?.season||"all","brain-duration":row.expires_at?"24":"0"};
+      this.render();
+      const field=this.shadowRoot.querySelector("#brain-note");
+      if(field){field.closest("details").open=true;field.scrollIntoView({block:"center"});field.focus();}
+    });
+    this.shadowRoot?.querySelectorAll("[data-brain-retract]").forEach(button=>button.onclick=async()=>{
+      if(this._busy)return; this._busy=true;
+      try {await this._hass.callService("ester","retract_brain_note",{knowledge_id:button.dataset.brainRetract}); await this.loadBrain();this._notice="Nota ritirata dalla memoria attiva, conservata nello storico.";}
+      catch(error){this._notice="Ritiro non confermato: "+error.message;}
+      finally{this._busy=false;this.render();}
+    });
     if (modeToggle) modeToggle.onclick = () => { this._advanced = !this._advanced; this.render(); };
     const teach = this.shadowRoot?.querySelector("#teach-send");
     if (teach) teach.onclick = () => this.teach();
@@ -1359,6 +1493,7 @@ class EsterPanel extends HTMLElement {
 
   render() {
     if (!this.shadowRoot) return;
+    const answerDrafts=[...this.shadowRoot.querySelectorAll('[id^="answer-"]')].map(field=>[field.id,field.value]);
     const draftText = this.shadowRoot.querySelector("#teach")?.value;
     const navScroll = this.shadowRoot.querySelector("nav")?.scrollLeft || 0;
     this.stopNeuralCore();
@@ -1371,13 +1506,15 @@ class EsterPanel extends HTMLElement {
     const thought = this.thoughtState();
 
     const tabs = [
-      ["overview","CORE"],["decisions","DECISIONI"],["questions","DOMANDE E RICHIESTE"],["teach","INSEGNA"],
-      ["energy","ENERGIA"],["learning","APPRENDIMENTO"],["validation","VALIDAZIONE"],
-      ["migration","MIGRAZIONE"],["config","CONFIG"]
+      ["brain","CERVELLO"],["decisions","DECISIONI"],["overview","CORE"],
+      ...(this._advanced ? [["energy","ENERGIA"],["learning","APPRENDIMENTO"],["validation","VALIDAZIONE"],
+      ["migration","MIGRAZIONE"],["config","CONFIG"]] : [])
     ];
 
     let body = "";
-    if (this._tab === "overview") {
+    if (this._tab === "brain") {
+      body=this.brainView()+this.brainExperiencesView();
+    } else if (this._tab === "overview") {
       body = `
         <section class="jarvis-stage">
           <div class="hud-grid"></div>
@@ -1450,7 +1587,7 @@ class EsterPanel extends HTMLElement {
         *{box-sizing:border-box}.shell{max-width:1700px;margin:auto;padding:18px 22px 50px}
         nav{display:flex;gap:8px;overflow:auto;padding:6px 0 18px;position:sticky;top:0;z-index:5;background:linear-gradient(#03080df2,#03080dd9 75%,transparent)}
         button{border:1px solid #19d9ff55;background:#071b24;color:#7feeff;padding:10px 14px;border-radius:7px;letter-spacing:.06em;cursor:pointer}
-        button:hover{background:#0b3443;box-shadow:0 0 15px #00cfff30}nav button.active{background:#0b3443;box-shadow:0 0 18px #00cfff40;border-color:#38e7ff}
+        .simple-status-grid.brain-metrics{grid-template-columns:repeat(2,minmax(0,1fr))!important}details.control>summary{cursor:pointer;min-height:44px;display:list-item;padding:10px 0}button:hover{background:#0b3443;box-shadow:0 0 15px #00cfff30}nav button.active{background:#0b3443;box-shadow:0 0 18px #00cfff40;border-color:#38e7ff}
 .jarvis-stage{min-height:430px;position:relative;display:grid;grid-template-columns:minmax(210px,1fr) minmax(300px,460px) minmax(210px,1fr);align-items:center;gap:26px;overflow:hidden;border-top:1px solid #64eaff3a;border-bottom:1px solid #64eaff24;background:radial-gradient(circle at 50% 50%,#0b52602b 0,transparent 45%),linear-gradient(90deg,transparent,#04121999 18%,#021017d9 50%,#04121999 82%,transparent);box-shadow:inset 0 0 120px #00d9ff0b}
         .jarvis-stage:before,.jarvis-stage:after{content:"";position:absolute;top:9%;bottom:9%;width:1px;background:linear-gradient(transparent,#5aefff88,transparent);box-shadow:0 0 12px #00dcff}.jarvis-stage:before{left:5%}.jarvis-stage:after{right:5%}
         .hud-grid{position:absolute;inset:0;background-image:linear-gradient(#35dff708 1px,transparent 1px),linear-gradient(90deg,#35dff708 1px,transparent 1px);background-size:30px 30px;mask-image:radial-gradient(circle at center,#000 10%,transparent 75%)}
@@ -1610,11 +1747,14 @@ class EsterPanel extends HTMLElement {
       </div>
     `;
     this.bind();
+    answerDrafts.forEach(([id,value])=>{const field=this.shadowRoot.getElementById(id);if(field)field.value=value;});
+    this.shadowRoot.querySelectorAll("[data-brain-field]").forEach(field=>{if(this._brainForm?.[field.id] !== undefined)field.value=this._brainForm[field.id];});
     const teachField = this.shadowRoot.querySelector("#teach");
     if (teachField && draftText !== undefined) teachField.value = draftText;
     const nav = this.shadowRoot.querySelector("nav");
     if (nav) nav.scrollLeft = navScroll;
-    if (this._tab === "teach" && this._hass && !this._fileCollection && !this._loadingCollection && !this._collectionError) this.loadFileCollection();
+    if (["brain","teach"].includes(this._tab) && this._hass && !this._fileCollection && !this._loadingCollection && !this._collectionError) this.loadFileCollection();
+    if(this._tab === "brain" && this._hass && !this._brain && !this._brainLoading && !this._brainError) this.loadBrain();
     if (this._tab === "overview") requestAnimationFrame(()=>this.startNeuralCore());
   }
 }

@@ -4,6 +4,7 @@ from __future__ import annotations
 from uuid import uuid4
 from .ai.factory import create_provider
 from .language import local_interpret, validate_teaching
+from .brain import retrieval_context
 from homeassistant.util import dt as dt_util
 
 
@@ -18,10 +19,7 @@ async def interpret_and_store(hass, coordinator, message: str, *, preview: bool 
         response=await provider.async_extract_teaching(
             message=message,
             context={"shadow_mode":True,"allowed_area_ids":area_ids,
-                     "existing_knowledge":[
-                         {"domain":k.get("domain"),"kind":k.get("kind"),"statement":k.get("statement") or k.get("text")}
-                         for k in coordinator.storage.data.get("knowledge",[]) if k.get("status","active")=="active"
-                     ][-40:]},
+                     **retrieval_context(coordinator.storage.data, message, dt_util.utcnow())},
         )
         teaching=validate_teaching(response.structured or {},message)
         provider_name=response.provider or "gemini"
