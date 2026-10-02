@@ -31,7 +31,11 @@ class EsterPanel extends HTMLElement {
     // Preserve scroll position and unsent answers during background updates.
     const progress = this.shadowRoot?.querySelector("#ester-progress");
     if (progress) progress.innerHTML = this.progressView();
-    if (this._tab === "overview") this.startNeuralCore();
+    if (this._tab === "overview") {
+      const decisions = this.shadowRoot?.querySelector("#core-latest");
+      if (decisions) { decisions.innerHTML = this.coreDecisionView(); decisions.querySelector("[data-tab]")?.addEventListener("click",()=>{this._tab="decisions";this.render();}); }
+      this.startNeuralCore();
+    }
     if (this._tab === "teach" && !this._fileCollection && !this._loadingCollection && !this._collectionError) this.loadFileCollection();
   }
   disconnectedCallback() { this._recognition?.abort(); this.stopNeuralCore(); }
@@ -497,9 +501,20 @@ class EsterPanel extends HTMLElement {
 
   progressView() {
     const p = this.summary().progress;
+    if (this._tab === "overview") {
+      const known = p && Number.isFinite(Number(p.verified_percent));
+      const value = known ? Math.max(0,Math.min(100,Number(p.verified_percent))) : 0;
+      return `<article class="core-progress"><div class="core-progress-heading"><b>Preparazione verificata</b><strong>${known ? value+"%" : "—"}</strong></div><progress aria-label="Preparazione verificata" max="100" value="${value}"></progress><p>${known ? `${this.esc(p.verified)} di ${this.esc(p.total)} requisiti verificati` : "In valutazione: attendo i primi dati"}</p><details><summary>Cosa manca per essere affidabile</summary><p>La percentuale riguarda i requisiti verificati. Lo Shadow Mode non termina automaticamente: servono sviluppo e validazione del controllo reale.</p>${(p?.checks || []).map(c=>`<p>${c.verified ? "✓" : "○"} ${this.esc(c.label)}</p>`).join("")}</details></article>`;
+    }
     if (!p) return '<article class="control"><h3>Preparazione di E.S.T.E.R.</h3><p>In attesa della prima valutazione. Efficienza reale non misurabile in Shadow Mode.</p></article>';
     const value = Math.max(0,Math.min(100,Number(p.verified_percent)||0));
     return `<article class="control"><h3>Preparazione di E.S.T.E.R.</h3><p><b>${value}% dei requisiti verificati</b> · ${this.esc(p.verified)}/${this.esc(p.total)}</p><progress aria-label="Requisiti verificati" max="100" value="${value}" style="width:100%;height:20px;accent-color:#74e9ef"></progress><p>${this.esc(p.note)}</p><details><summary>Cosa manca e cosa è già verificato</summary>${(p.checks||[]).map(c=>'<p>'+ (c.verified?'✓ ':'○ ')+this.esc(c.label)+'</p>').join("")}</details><p><b>Efficienza reale: non ancora misurabile</b><br>${this.esc(p.efficiency_reason)}</p><p>Qualità delle proposte secondo i tuoi feedback: ${p.feedback_quality_percent == null ? "nessun dato" : this.esc(p.feedback_quality_percent)+"%"} (${this.esc(p.feedback_samples)} valutazioni). Non è un risparmio energetico misurato.</p></article>`;
+  }
+
+  coreDecisionView() {
+    const items = this.currentDecisions(this.realDecisions()).slice().sort((a,b)=>
+      (Date.parse(b.last_seen || b.created_at) || 0) - (Date.parse(a.last_seen || a.created_at) || 0)).slice(0,2);
+    return `<div class="core-decisions-heading"><h2>Ultime 2 decisioni</h2><button data-tab="decisions">Vedi tutte</button></div><section class="core-decisions">${items.map(d=>`<article class="core-decision"><div class="core-decision-heading"><b>${this.esc(this.roomName(d.area_id))}</b><span>${this.esc(this.categoryLabel(d.category))} · ${this.pct(d.confidence)}</span></div><h3>${this.esc(d.title)}</h3><p>${this.esc(d.proposed_action)}</p><details><summary>Perché questa proposta?</summary><p>${this.esc(d.reasoning || "Motivazione non disponibile")}</p></details></article>`).join("") || '<p class="empty">Sto raccogliendo dati: nessuna decisione disponibile.</p>'}</section>`;
   }
 
   async exportLearningReport() {
@@ -1384,15 +1399,8 @@ class EsterPanel extends HTMLElement {
           <div class="live-chip"><i></i> SHADOW ATTIVO · NESSUNA AZIONE REALE</div>
         </section>
 
-        <section class="command-deck">
-          <div class="command-head"><span>CONOSCENZA CASA</span><b>INSEGNA A E.S.T.E.R.</b></div>
-          <p>Per raccontarmi come vivete la casa, cosa preferite e le eccezioni, usa la sezione INSEGNA. Per i file bastano caricamento e salvataggio; per i racconti ti mostro cosa ho capito.</p>
-          <button data-tab="teach">APRI INSEGNA</button>
-        </section>
-        <h2 class="section-title">PREVISIONE CASA</h2>
-        ${this.forecastCard()}
-        <h2 class="section-title">ULTIME DECISIONI</h2>
-        ${this.groupedDecisionCards(this.realDecisions().slice(-12))}
+        <div id="ester-progress">${this.progressView()}</div>
+        <div id="core-latest">${this.coreDecisionView()}</div>
       `;
     } else if (this._tab === "decisions") {
       const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety"];
@@ -1530,12 +1538,53 @@ class EsterPanel extends HTMLElement {
         #knowledge-files-upload{min-height:48px;min-width:120px;margin:8px 0}
         #knowledge-upload-progress{display:block;width:100%;height:18px;margin-top:12px;accent-color:#74e9ef}
         #knowledge-upload-status{overflow-wrap:anywhere}
+        .core-shell .jarvis-stage{min-height:230px;grid-template-columns:1fr 230px 1fr;gap:12px}
+        .core-shell .jarvis{width:230px;height:230px;min-width:0;min-height:0}
+        .core-shell .identity-strip{padding:10px 0;min-height:0;margin:0;gap:8px}
+        .core-shell .identity-strip strong{font-size:28px;letter-spacing:.12em}
+        .core-shell .identity-strip span{display:none}
+        .core-shell .mode-toggle{display:none}
+        .core-shell .telemetry{padding:12px}
+        .core-shell .tele-row{font-size:12px;padding:5px 0}
+        .core-progress{border:1px solid #56b7c342;border-radius:12px;background:#081d27;padding:14px;margin:10px 0}
+        .core-progress-heading,.core-decisions-heading,.core-decision-heading{display:flex;justify-content:space-between;align-items:center;gap:10px}
+        .core-progress-heading strong{font-size:24px;color:#74e9ef}
+        .core-progress progress{display:block;width:100%;height:16px;margin:8px 0;accent-color:#74e9ef}
+        .core-progress p,.core-decision p{font-size:15px;line-height:1.4;margin:6px 0;color:#c1dce3}
+        .core-progress summary,.core-decision summary{font-size:14px;color:#9fe9f3;cursor:pointer;min-height:24px;padding:4px 0}
+        .core-decisions-heading h2{font-size:17px;margin:10px 0}
+        .core-decisions-heading button{font-size:14px;padding:6px 12px}
+        .core-decisions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        .core-decision{padding:12px 14px;border:1px solid #56b7c342;border-radius:12px;background:#081d27;min-width:0;overflow-wrap:anywhere}
+        .core-decision-heading{align-items:flex-start;flex-wrap:wrap;font-size:14px;color:#74e9ef}
+        .core-decision-heading span{font-size:13px;color:#c1dce3}
+        .core-decision h3{font-size:17px;line-height:1.3;margin:7px 0}
+        @media(max-width:800px){
+          .core-shell .jarvis-stage{display:grid!important;grid-template-columns:minmax(0,1fr) 130px;gap:8px;padding:0;min-height:140px!important}
+          .core-shell .jarvis{order:2;width:130px!important;height:130px!important}
+          .core-shell .telemetry.left{order:1;padding:8px!important;width:auto!important}
+          .core-shell .telemetry.right,.core-shell .hud-label,.core-shell .hud-line,.core-shell .neural-caption span{display:none!important}
+          .core-shell .hud-value{font-size:18px;margin:2px 0 6px}
+          .core-shell .tele-row{font:11px/1.4 Inter,Roboto,sans-serif;gap:6px}
+          .core-shell .telemetry.left .tele-row:nth-of-type(4){display:none}
+          .core-shell .identity-strip{flex-direction:row!important;align-items:center!important;padding:6px 0!important}
+          .core-shell .identity-strip strong{font-size:22px}
+          .core-shell .live-chip{font-size:10px;max-width:150px;letter-spacing:0;line-height:1.4}
+          .core-shell .mobile-nav-wrap{margin-bottom:4px;padding:2px 10px 3px}
+          .core-decisions{grid-template-columns:1fr}
+          .core-progress{padding:10px 12px;margin:6px 0}
+          .core-progress-heading{font-size:15px}.core-progress-heading strong{font-size:21px}
+          .core-progress p{font-size:13px}.core-decision{padding:10px 12px}
+          .core-decision-heading{font-size:13px;gap:4px}.core-decision-heading span{font-size:12px}
+          .core-decision h3{font-size:16px;margin:4px 0}.core-decision p{font-size:14px;margin:4px 0}
+          .core-shell .neural-caption strong{font-size:10px!important;letter-spacing:0!important}
+        }
       </style>
-      <div class="shell">
+      <div class="shell ${this._tab === "overview" ? "core-shell" : ""}">
         ${this._notice ? '<div class="notice">'+this.esc(this._notice)+'</div>' : ''}
         <div class="mobile-nav-wrap"><nav id="ester-nav">${tabs.map(([id,label])=>`<button data-tab="${id}" class="${this._tab===id?"active":""}">${label}</button>`).join("")}</nav><button id="mode-toggle" class="mode-toggle">${this._advanced?"MODALITÀ SEMPLICE":"DETTAGLI TECNICI"}</button></div>
         ${this._tab === "learning" || this._tab === "config" ? '<article class="control"><h3>A che punto è E.S.T.E.R.?</h3><p>Scarica un rapporto completo con memoria, sensori, modelli appresi, domande, feedback e proposte. Contiene informazioni sulla casa; condividilo solo se lo desideri.</p><button id="learning-report">SCARICA RAPPORTO COMPLETO</button><p>Memoria salvata e affidabilità operativa sono valutazioni diverse. E.S.T.E.R. resta in Shadow Mode.</p></article>' : ''}
-        ${this._tab === "overview" || this._tab === "learning" ? '<div id="ester-progress">'+this.progressView()+'</div>' : ""}
+        ${this._tab === "learning" ? '<div id="ester-progress">'+this.progressView()+'</div>' : ""}
         ${body}
       </div>
     `;

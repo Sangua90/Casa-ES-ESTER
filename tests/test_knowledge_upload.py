@@ -222,4 +222,20 @@ class KnowledgeUploadTests(unittest.IsolatedAsyncioTestCase):
               panel.hass = {...panel._hass};
               return nav.scrollLeft === before && before > 0;
             }'''))
+            await page.evaluate('''() => {
+              const panel = document.querySelector('ester-panel');
+              panel._tab = 'overview'; panel._notice = '';
+              const latest = [1,3,2].map(i=>({category:'lighting',area_id:'salotto',title:'Proposta '+i,proposed_action:'Mantenere la luce accesa',reasoning:'Presenza rilevata',confidence:.7,created_at:'2026-10-02T10:0'+i+':00Z'}));
+              panel._hass.states={'sensor.e_s_t_e_r_summary':{attributes:{rooms:{salotto:{name:'Salotto'}},progress:{verified_percent:40,verified:4,total:10,checks:[]}}},'sensor.e_s_t_e_r_shadow_decisions':{state:'3',attributes:{latest}}};
+              panel.render();
+            }''')
+            self.assertEqual(await page.locator('.core-decision').count(), 2)
+            self.assertEqual(await page.locator('.core-progress progress').get_attribute('value'), '40')
+            self.assertFalse(await page.get_by_text('PREVISIONE CASA', exact=True).count())
+            self.assertTrue(await page.evaluate('''() => {
+              const root=document.querySelector('ester-panel').shadowRoot;
+              return document.documentElement.scrollWidth <= innerWidth && root.querySelector('#core-latest').getBoundingClientRect().bottom <= 740;
+            }'''))
+            await page.get_by_role('button', name='Vedi tutte', exact=True).click()
+            self.assertTrue(await page.locator('.decision-explainer').is_visible())
             await browser.close()

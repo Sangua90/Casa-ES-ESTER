@@ -58,6 +58,17 @@ vm.runInNewContext(readFileSync('custom_components/ester/frontend/ester-panel.js
   assert.ok(!notesView.includes('PRIVATE FILE CONTENT'));
   assert.ok(!display.configView().includes('id="class-save"'));
   assert.ok(display.configView(true).includes('id="class-save"'));
+  display._tab = 'overview';
+  display._hass.states['sensor.e_s_t_e_r_summary'].attributes.progress = {verified_percent:40,verified:4,total:10,checks:[]};
+  assert.ok(display.progressView().includes('value="40"'));
+  delete display._hass.states['sensor.e_s_t_e_r_summary'].attributes.progress;
+  assert.ok(display.progressView().includes('In valutazione'));
+  assert.ok(display.progressView().includes('<progress'));
+  display._hass.states['sensor.e_s_t_e_r_shadow_decisions'] = {attributes:{latest:[{...older,title:'Old decision'}, {...newer,title:'Latest decision'}, {...otherRoom,title:'Middle decision',created_at:'2026-10-01T08:30:00Z'}]}};
+  const coreCards = display.coreDecisionView();
+  assert.equal((coreCards.match(/<article /g) || []).length, 2);
+  assert.ok(coreCards.indexOf('Latest decision') < coreCards.indexOf('Middle decision'));
+  assert.ok(!coreCards.includes('Old decision'));
   display._hass.states['sensor.e_s_t_e_r_shadow_decisions'] = {attributes:{latest:[]}};
   display._hass.states['sensor.e_s_t_e_r_summary'].attributes.decision_history = [older];
   assert.equal(display.realDecisions().length, 0);

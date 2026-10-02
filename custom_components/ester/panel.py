@@ -6,6 +6,7 @@ from pathlib import Path
 from homeassistant.components import frontend
 from homeassistant.components.http import StaticPathConfig
 from .knowledge_upload import KnowledgeUploadView
+from .const import VERSION
 
 PANEL_URL = "ester"
 STATIC_URL = "/ester_static"
@@ -34,7 +35,7 @@ def async_register_panel(hass) -> None:
                 "name": PANEL_ELEMENT,
                 "embed_iframe": True,
                 "trust_external": False,
-                "js_url": f"{STATIC_URL}/ester-panel.js",
+                "js_url": f"{STATIC_URL}/ester-panel.js?v={VERSION}",
             }
         },
         require_admin=True,
