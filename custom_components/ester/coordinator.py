@@ -38,6 +38,7 @@ from .daily_forecast import daily_forecast
 from .language import knowledge_overview
 from .knowledge_policy import prepare_profiles
 from .progress import progress_status
+from .diagnostics_report import knowledge_audit
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -281,5 +282,7 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 "decision_history": [d for d in journal[-100:] if (not d.get("area_id") or d["area_id"] in area_ids) and (not d.get("entity_ids") or any(e in entity_ids for e in d["entity_ids"]))],
                 "flexible_loads": data.get("flexible_loads", []),
                 "evaluated_at": now.isoformat()}
+        result["knowledge_audit"] = knowledge_audit(data, result)
+        result["memory_protection"] = dict(self.storage.backup_status)
         result["progress"] = progress_status(data, result, now)
         return result

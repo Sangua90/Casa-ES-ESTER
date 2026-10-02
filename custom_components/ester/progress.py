@@ -16,10 +16,13 @@ def progress_status(memory, current, now):
         {"id": "memory", "label": "Memorie confermate presenti", "verified": bool(knowledge)},
         {"id": "inventory", "label": "Tutti i sensori classificati disponibili e aggiornati entro due ore", "verified": bool(profiles) and len(fresh) == len(profiles)},
         {"id": "history", "label": "Storico Recorder disponibile", "verified": current.get("history", {}).get("status") == "ready"},
-        {"id": "models", "label": "Almeno un modello con confidence ≥ 60%", "verified": any((v.get("confidence") or 0) >= .6 for v in models)},
+        {"id": "models", "label": "Tutti i modelli disponibili con confidence ≥ 60%", "verified": bool(models) and all((v.get("confidence") or 0) >= .6 for v in models)},
         {"id": "replay", "label": "Replay storico completato con decisioni", "verified": memory.get("last_replay", {}).get("status") == "ready" and memory.get("last_replay", {}).get("decisions", 0) > 0},
         {"id": "validation", "label": "Domini valutati candidati alla verifica manuale", "verified": bool(domains) and all(v.get("status") == "candidate_for_manual_migration" for v in domains)},
         {"id": "actuation", "label": "Controllo reale implementato, verificato e autorizzato", "verified": False},
+        {"id": "knowledge_rules", "label": "Regole memorizzate verificate nelle proposte attuali", "verified": bool(knowledge) and "knowledge_audit" in current and not any(k.get("operational_verification_pending") for k in current["knowledge_audit"])},
+        {"id": "data_coverage", "label": "Nessuna lacuna o associazione ambigua nei dati", "verified": bool(profiles) and not current.get("data_suggestions") and all(k.get("status") == "applied" for k in current.get("knowledge_application", []))},
+        {"id": "questions", "label": "Chiarimenti richiesti completati", "verified": not any(q.get("status") in {"open", "deferred"} for q in memory.get("questions", []))},
     ]
     verified = sum(c["verified"] for c in checks)
     feedback = current.get("kpis", {}).get("feedback", {})

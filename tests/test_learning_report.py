@@ -31,7 +31,7 @@ class LearningReportTests(unittest.TestCase):
                    "migration_readiness": {"climate": {"status": "candidate_for_manual_migration"}},
                    "questions": [], "kpis": {"feedback": {"quality_score": .9, "samples": 20}}}
         status = progress.progress_status(data, current, NOW)
-        self.assertEqual(status["verified"], 6)
+        self.assertEqual(status["verified"], 8)
         self.assertLess(status["verified_percent"], 100)
         self.assertFalse(status["operational"])
         self.assertIsNone(status["real_efficiency_percent"])
@@ -95,3 +95,12 @@ class LearningReportTests(unittest.TestCase):
         self.assertEqual(result["assessment"]["knowledge_audit"][0]["application"], "context_only")
         self.assertFalse(result["real_actuation_enabled"])
         self.assertNotIn("memory", result["memory_and_learning"]["memory_versions"][0])
+
+    def test_rules_are_not_verified_just_because_they_are_saved(self):
+        memory = {"knowledge": [{"knowledge_id": "r", "kind": "rule", "statement": "Solo quando sono a casa"}]}
+        audit = report.knowledge_audit(memory, {})
+        self.assertTrue(audit[0]["operational_verification_pending"])
+        current = {"latest_decisions": [{"evidence": {"knowledge_context": [{"knowledge_id": "r", "application": "context_only"}]}}]}
+        self.assertTrue(report.knowledge_audit(memory, current)[0]["operational_verification_pending"])
+        current["latest_decisions"][0]["evidence"]["knowledge_context"][0]["application"] = "constraint_applied"
+        self.assertFalse(report.knowledge_audit(memory, current)[0]["operational_verification_pending"])

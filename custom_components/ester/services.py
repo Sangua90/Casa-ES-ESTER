@@ -226,7 +226,8 @@ def register_services(hass):
         async with coordinator.storage.lock:
             current = coordinator.data or {}
             document = export_questions(coordinator.storage.data, current.get("rooms", {}), dt_util.utcnow())
-            document["diagnostic_context"] = {key: current.get(key) for key in ("data_suggestions", "anomalies", "knowledge_application", "progress")}
+            document["diagnostic_context"] = {key: current.get(key) for key in ("data_suggestions", "knowledge_gaps", "anomalies", "knowledge_application", "knowledge_audit", "progress")}
+            document["diagnostic_instructions"] = "Spiega anche le segnalazioni tecniche senza inventare risposte. diagnostic_context è informativo e non viene importato come configurazione. Eventuali nuove note vanno in un file ester-knowledge-v1 da caricare in Insegna."
             return document
 
     async def import_question_file(call):

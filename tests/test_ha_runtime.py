@@ -52,6 +52,7 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
             second = await coordinator._async_update_data()
         self.assertEqual(first["decision_count"], second["decision_count"])
         self.assertEqual(first["history"]["status"], "unavailable")
+
         self.assertIn(room.id, first["rooms"])
         coordinator.async_set_updated_data(second)
         entry = SimpleNamespace(entry_id="test", runtime_data=coordinator)
@@ -60,6 +61,44 @@ class HomeAssistantTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sensors), 6)
         self.assertEqual(sensors[0].native_value, "shadow")
         self.assertFalse(sensors[0].extra_state_attributes["real_actuation_enabled"])
+
+    async def test_memory_backup_recovery_and_native_backup_flush(self):
+        from custom_components.ester.storage import EsterStorage, memory_digest
+        from custom_components.ester.backup import async_pre_backup
+        store = EsterStorage(self.hass)
+        store.data["knowledge"] = [{"knowledge_id": "remember", "text": "Una nota importante"}]
+        store.data["knowledge_documents"] = [{"name": "nota.json", "content": "originale"}]
+        store.data["thermal_models"] = {"room": {"confidence": .8}}
+        await store.async_save()
+        saved = await store._backup_store.async_load()
+        self.assertEqual(saved["copies"][0]["sha256"], memory_digest(store.data))
+        restored = EsterStorage(self.hass)
+        with patch.object(restored._store, "async_load", side_effect=ValueError("corrupt")):
+            await restored.async_load()
+        self.assertEqual(restored.data, store.data)
+        self.assertEqual(restored.backup_status["status"], "recovered")
+        # A bad newest checksum falls back to the previous verified generation.
+        saved["copies"].insert(0, {"memory": {"knowledge": []}, "sha256": "bad"})
+        await store._backup_store.async_save(saved)
+        second = EsterStorage(self.hass)
+        with patch.object(second._store, "async_load", return_value=None):
+            await second.async_load()
+        self.assertEqual(second.data["knowledge_documents"], store.data["knowledge_documents"])
+        await store._backup_store.async_save({"copies": [{"memory": {}, "sha256": "invalid"}]})
+        invalid = EsterStorage(self.hass)
+        with patch.object(invalid._store, "async_load", return_value=None), patch.object(invalid._store, "async_save", new_callable=AsyncMock) as write:
+            with self.assertRaises(ValueError):
+                await invalid.async_load()
+            write.assert_not_awaited()
+        fake_hass = SimpleNamespace(config_entries=SimpleNamespace(async_loaded_entries=lambda domain: [SimpleNamespace(runtime_data=SimpleNamespace(storage=store))]))
+        with patch.object(store, "async_create_backup", wraps=store.async_create_backup) as flush:
+            await async_pre_backup(fake_hass)
+        flush.assert_awaited()
+        self.assertEqual(len(store._backup["copies"]), 2)
+        store.data["preferences"]["new"] = "must persist"
+        with patch.object(store._store, "async_save", new_callable=AsyncMock):
+            with self.assertRaises(OSError):
+                await store.async_save()
 
     async def test_recorder_adapter_and_statistics_signature(self):
         from homeassistant.core import State

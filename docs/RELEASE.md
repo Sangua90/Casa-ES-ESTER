@@ -1,3 +1,16 @@
+## E.S.T.E.R. 1.5.1 — File di note e salvataggio semplice
+
+- Insegna contiene Note per E.S.T.E.R. e un modello JSON da far compilare a ChatGPT.
+- Per i file: CARICA, controllo automatico del formato e SALVA NELLA MEMORIA. Il contenuto non viene mostrato. I file pendenti possono essere salvati direttamente dalla raccolta anche dopo aver riaperto il pannello.
+- Le risposte alle domande seguono lo stesso flusso, senza anteprima del contenuto. La validazione resta atomica e il salvataggio separato.
+- Domande e richieste raccoglie lacune, associazioni ambigue, regole da verificare e strumenti amministrativi. Configurazione diventa un riepilogo consultabile.
+- Il file delle domande comprende anche lacune della conoscenza e audit delle regole, come contesto informativo per ChatGPT.
+- Ogni conoscenza attiva compare nell'audit: una regola salvata o usata solo come contesto rimane da verificare. La checklist comprende questa verifica, dati mancanti, domande differite e tutti i modelli disponibili.
+- Protezione memoria: due copie locali complete con integrità verificata, recupero automatico e salvataggio prima dei backup nativi Home Assistant. Nessuna cancellazione delle conoscenze più vecchie per limiti numerici. Guida: docs/MEMORY_BACKUP.md.
+- Nessun controllo reale: la checklist non certifica la piena preparazione operativa, gli ottimizzatori completi e la conversione generalizzata delle regole restano da sviluppare. Efficienza reale non misurabile in Shadow Mode.
+
+Aggiornare da HACS, riavviare Home Assistant e ricaricare il pannello.
+
 ## E.S.T.E.R. 1.5.0 — Rapporto completo e memoria nelle valutazioni Shadow
 
 - In Apprendimento e Config: SCARICA RAPPORTO COMPLETO con memoria, inventario, modelli, campioni, domande, feedback, esiti Shadow e audit delle conoscenze.
