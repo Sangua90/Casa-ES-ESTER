@@ -1,3 +1,17 @@
+## E.S.T.E.R. 1.5.3 — Memoria nelle decisioni correnti
+
+- Le note confermate in Altro (TXT, Markdown e testo libero) vengono collegate agli argomenti pertinenti senza riscrivere la memoria.
+- Riferimenti espliciti ai sensori energetici utilizzabili anche dalle note non etichettate.
+- Informazioni sulla presenza immobile in una stanza possono sospendere una proposta di spegnimento, con controlli su stanza e negazioni.
+- Le decisioni mostrano la memoria considerata e il dubbio residuo quando la nota resta solo contesto.
+- La pagina Decisioni si aggiorna con le nuove valutazioni senza ricostruire il menu o perdere i dettagli aperti.
+
+Questo migliora il collegamento memoria/valutazione, ma non è un interprete generale
+di ogni abitudine o eccezione. Una nota di comfort non diventa automaticamente un
+setpoint stagionale; restano necessari preferenze strutturate e dati verificati.
+Shadow Mode invariato, senza attuazioni o nuove chiamate AI automatiche.
+Aggiorna da HACS, riavvia Home Assistant e ricarica E.S.T.E.R.
+
 ## E.S.T.E.R. 1.5.2 — CORE compatto su iPhone
 
 - CORE mantiene il nucleo Jarvis, la barra di preparazione e solo le ultime due decisioni, ordinate per data.

@@ -24,6 +24,40 @@ def sensor(entity, role, state="off", unit=None, area="room"):
 
 
 class LearningReportTests(unittest.TestCase):
+    def test_plain_text_memory_is_used_without_changing_its_category(self):
+        profiles = [sensor("light.room", "lighting", "on"), sensor("binary_sensor.motion", "presence")]
+        memory = [{"knowledge_id": "plain", "domain": "other", "source_file": "casa.txt",
+                   "statement": "In Salotto qualcuno può rimanere immobile sul divano."}]
+        before = deepcopy(memory)
+        light = next(d for d in evaluate(Engine(), profiles, {}, [], {}, [], NOW, knowledge=memory) if d.category == "lighting")
+        self.assertEqual(light.status, models.DecisionStatus.SUPPRESSED)
+        self.assertEqual(light.evidence['knowledge_context'][0]['source_file'], 'casa.txt')
+        self.assertEqual(memory, before)
+        memory[0]['status'] = 'superseded'
+        light = next(d for d in evaluate(Engine(), profiles, {}, [], {}, [], NOW, knowledge=memory) if d.category == "lighting")
+        self.assertEqual(light.proposed_action, "Avrei spento la luce")
+
+    def test_text_scope_does_not_move_a_rule_to_another_room(self):
+        profiles = [sensor("light.room", "lighting", "on"), sensor("binary_sensor.motion", "presence"),
+                    models.EntityProfile('light.kitchen', 'light', 'Cucina', 'on', area_id='kitchen', role='lighting', attributes={'area_name':'Cucina','last_reported':NOW.isoformat()})]
+        note = {'domain':'other','statement':'In Cucina qualcuno può rimanere immobile.'}
+        self.assertEqual(policy.relevant_knowledge([note], 'lighting', 'room', profiles), [])
+        self.assertEqual(policy.relevant_knowledge([note], 'lighting', 'kitchen', profiles), [note])
+        note['statement'] = 'In Salotto nessuno rimane immobile.'
+        light = next(d for d in evaluate(Engine(), profiles, {}, [], {}, [], NOW, knowledge=[note]) if d.category == "lighting" and d.area_id=='room')
+        self.assertNotEqual(light.status, models.DecisionStatus.SUPPRESSED)
+
+    def test_unlabelled_energy_ids_and_unimplemented_climate_are_traceable(self):
+        pv = sensor('sensor.pv', 'generic', '1200', 'W')
+        mapped, audit = policy.prepare_profiles([pv], [{'domain':'other','statement':'FV reale: sensor.pv'}])
+        self.assertEqual(mapped[0].role, 'solar_power')
+        self.assertEqual(audit[0]['status'], 'applied')
+        profiles = [sensor('climate.room','climate','heat'), sensor('sensor.t','temperature','18','°C')]
+        note = {'knowledge_id':'comfort', 'domain':'other','statement':'In Salotto preferiamo comfort intorno a 21 gradi.'}
+        climate = next(d for d in evaluate(Engine(), profiles, {}, [], {}, [], NOW, knowledge=[note]) if d.category=='climate' and d.title=='Comfort da definire')
+        self.assertEqual(climate.evidence['knowledge_context'][0]['knowledge_id'], 'comfort')
+        self.assertIn('Resta da verificare', climate.evidence['knowledge_followup'])
+
     def test_progress_is_evidence_not_autonomous_activation(self):
         data = {"knowledge": [{"knowledge_id": "k"}], "last_replay": {"status": "ready", "decisions": 12}}
         current = {"profiles": {"sensor.t": sensor("sensor.t", "temperature", "20", "°C").as_dict()},

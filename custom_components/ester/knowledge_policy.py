@@ -15,13 +15,31 @@ def active_knowledge(items):
     return [k for k in items if k.get("status", "active") == "active"]
 
 
+def knowledge_topics(item):
+    """Route unlabelled confirmed prose as context without rewriting stored facts."""
+    domain = item.get("domain") or item.get("category")
+    if domain and domain != "other":
+        return {domain}
+    text = (item.get("statement") or item.get("text") or "").lower()
+    keywords = {
+        "climate": ("clima", "riscald", "raffresc", "multisplit", "temperatura", "comfort"),
+        "lighting": ("luci", "luce", "illumin", "movimento", "immobile", "divano", "presenza"),
+        "presence": ("presenza", "movimento", "immobile", "fermo", "divano", "dorme"),
+        "hot_water": ("boiler", "acqua calda", "acs", "prelievi", "doccia"),
+        "energy": ("fotovolta", "fv", "batteria", "consumo totale", "rete", "soc"),
+        "ventilation": ("ventil", "umidit", "aria viziata"),
+        "security": ("antifurto", "allarme"),
+    }
+    return {topic for topic, terms in keywords.items() if any(term in text for term in terms)}
+
+
 def prepare_profiles(profiles, knowledge, classifications=None):
     """Accept only explicit energy entity IDs with compatible units; never guess names."""
     candidates = {}
     by_id = {p.entity_id: p for p in profiles}
     applications = []
     for k in active_knowledge(knowledge):
-        if (k.get("domain") or k.get("category")) != "energy":
+        if "energy" not in knowledge_topics(k):
             continue
         text = k.get("statement") or k.get("text") or ""
         matches = list(re.finditer(r"\bsensor\.[a-z0-9_]+\b", text))
@@ -79,9 +97,26 @@ def prepare_profiles(profiles, knowledge, classifications=None):
 def relevant_knowledge(knowledge, category, area, profiles):
     names = {normalized(area)} if area else set()
     names.update(normalized(p.attributes.get("area_name")) for p in profiles if p.area_id == area and p.attributes.get("area_name"))
-    return [k for k in active_knowledge(knowledge)
-            if (k.get("domain") or k.get("category")) == category
-            and (not k.get("area_id") or normalized(k["area_id"]) in names)]
+    area_names = {}
+    for profile in profiles:
+        if profile.area_id:
+            area_names.setdefault(profile.area_id, set()).add(normalized(profile.area_id))
+            if profile.attributes.get("area_name"):
+                area_names[profile.area_id].add(normalized(profile.attributes["area_name"]))
+    result = []
+    for item in active_knowledge(knowledge):
+        if category not in knowledge_topics(item):
+            continue
+        if item.get("area_id"):
+            if normalized(item["area_id"]) not in names:
+                continue
+        elif area:
+            text = normalized(item.get("statement") or item.get("text") or "")
+            mentioned = {room for room, aliases in area_names.items() if any(alias and alias in text for alias in aliases)}
+            if mentioned and mentioned != {area}:
+                continue
+        result.append(item)
+    return result
 
 
 def apply_constraints(decisions, profiles, knowledge):
@@ -90,12 +125,16 @@ def apply_constraints(decisions, profiles, knowledge):
         notes = relevant_knowledge(knowledge, decision.category, decision.area_id, profiles)
         decision.evidence["knowledge_context"] = [
             {"knowledge_id": k.get("knowledge_id"), "statement": k.get("statement") or k.get("text"),
-             "scope": k.get("scope"), "application": "context_only"} for k in notes]
+             "source_file": k.get("source_file"), "scope": k.get("scope"), "application": "context_only"} for k in notes]
         blockers = []
         for k, reference in zip(notes, decision.evidence["knowledge_context"]):
             text = (k.get("statement") or k.get("text") or "").lower()
             reason = None
-            if decision.category == "lighting" and decision.evidence.get("lighting_plan", {}).get("strategy") == "would_turn_off" and any(w in text for w in ("immobile", "fermo", "dorme", "divano")):
+            stationary = any(w in text for w in ("immobile", "fermo", "dorme", "divano"))
+            unlabelled = (k.get("domain") or k.get("category")) in {None, "other"}
+            affirmative = bool(re.search(r"\b(può|possono|rimane|rimangono|resta|restano|capita)\b", text))
+            negative = bool(re.search(r"\b(non|nessuno|mai|nessuna)\b", text))
+            if decision.category == "lighting" and decision.evidence.get("lighting_plan", {}).get("strategy") == "would_turn_off" and stationary and (not unlabelled or affirmative and not negative):
                 reason = "La memoria segnala presenza possibile senza movimento: non propongo lo spegnimento sulla sola assenza rilevata."
             if decision.category == "hot_water" and any(w in text for w in ("target fisso", "temperatura dinamica")) and any(w in text for w in ("non", "nessun", "dinamic")):
                 reason = "Hai richiesto ACS adattiva: il piano con target fisso non soddisfa questa richiesta. Serve verificare previsione dei prelievi e modello di recupero; non invento una temperatura."
@@ -116,4 +155,6 @@ def apply_constraints(decisions, profiles, knowledge):
             decision.reasoning = " ".join(b["reason"] for b in blockers)
             decision.status = DecisionStatus.SUPPRESSED
             decision.confidence = min(decision.confidence, .4)
+        elif notes and decision.evidence.get("question"):
+            decision.evidence["knowledge_followup"] = "Informazioni già considerate dalla memoria. Resta da verificare: " + decision.evidence["question"]
     return decisions

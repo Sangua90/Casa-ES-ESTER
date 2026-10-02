@@ -46,6 +46,17 @@ class EsterPanel extends HTMLElement {
       this.startNeuralCore();
     }
     if (this._tab === "teach" && !this._fileCollection && !this._loadingCollection && !this._collectionError) this.loadFileCollection();
+    if (this._tab === "decisions") {
+      const container = this.shadowRoot?.querySelector("#current-decisions");
+      const markup = this.groupedDecisionCards();
+      if (container && markup !== this._decisionMarkup) {
+        const expanded = new Set();
+        container.querySelectorAll("[data-decision-id]").forEach(card=>card.querySelectorAll("details").forEach((detail,index)=>{if(detail.open) expanded.add(card.dataset.decisionId+":"+index);}));
+        container.innerHTML = markup; this._decisionMarkup = markup;
+        container.querySelectorAll("[data-decision-id]").forEach(card=>card.querySelectorAll("details").forEach((detail,index)=>{detail.open=expanded.has(card.dataset.decisionId+":"+index);}));
+        container.querySelectorAll("[data-open-tab]").forEach(button=>button.onclick=()=>{this._tab=button.dataset.openTab;this.render();});
+      }
+    }
   }
   disconnectedCallback() { this._recognition?.abort(); this.stopNeuralCore(); }
 
@@ -478,7 +489,7 @@ class EsterPanel extends HTMLElement {
       const objective = d.evidence?.objective_score?.score;
       const readiness = d.evidence?.objective_score?.execution_readiness;
       return `
-      <article class="decision true-decision">
+      <article class="decision true-decision" data-decision-id="${this.esc(d.decision_id || "")}">
         <div class="decision-head">
           <div>
             <div class="eyebrow">${this.esc(this.categoryLabel(d.category))}</div>
@@ -494,6 +505,7 @@ class EsterPanel extends HTMLElement {
         <details class="decision-reason"><summary>Perché questa proposta?</summary><p>${this.esc(d.reasoning)}</p></details>
         ${(d.evidence?.knowledge_context || []).length ? '<details><summary>Memoria considerata</summary>'+d.evidence.knowledge_context.map(k=>'<p>'+this.esc(k.statement)+'<br><small>'+this.esc(k.application === "constraint_applied" ? "Vincolo applicato: proposta sospesa" : "Solo contesto: nessuna regola automatica ricavata")+'</small></p>').join("")+'</details>' : ''}
         <div class="plain-explain">${this.esc(this.confidenceMeaning(d.confidence))}</div>
+        ${d.evidence?.knowledge_followup ? `<p class="hint">${this.esc(d.evidence.knowledge_followup)}</p>` : ""}
         ${d.evidence?.question ? '<button data-open-tab="questions">RISPONDI ALLE DOMANDE</button>' : ''}
         ${this._advanced ? `
           <details class="tech-details" open>
@@ -1413,7 +1425,7 @@ class EsterPanel extends HTMLElement {
       `;
     } else if (this._tab === "decisions") {
       const cats = ["all","energy","climate","hot_water","ventilation","lighting","security","presence","irrigation","operational_safety"];
-      body = this.viewHeader("DECISION / 02","PROPOSTE","Cosa farebbe E.S.T.E.R. e in quale stanza. Nessuna azione è stata eseguita.",this.pct(s.kpis?.avg_confidence),"FIDUCIA NEI DATI")+'<article class="control decision-explainer"><p>Mostro la proposta più recente per ogni stanza e dispositivo. Le valutazioni ripetute restano nel registro.</p><label>Mostra un argomento<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+this.groupedDecisionCards();
+      body = this.viewHeader("DECISION / 02","PROPOSTE","Cosa farebbe E.S.T.E.R. e in quale stanza. Nessuna azione è stata eseguita.",this.pct(s.kpis?.avg_confidence),"FIDUCIA NEI DATI")+'<article class="control decision-explainer"><p>Mostro la proposta più recente per ogni stanza e dispositivo. Le valutazioni ripetute restano nel registro.</p><label>Mostra un argomento<select id="decision-filter">'+cats.map(x=>'<option value="'+x+'" '+(this._decisionCategory===x?'selected':'')+'>'+this.categoryLabel(x)+'</option>').join("")+'</select></label></article>'+'<div id="current-decisions">'+this.groupedDecisionCards()+'</div>';
     } else if (this._tab === "questions") {
       body = this.viewHeader("QUESTIONS / 03","DOMANDE E RICHIESTE","Aiutami a conoscere meglio la casa, una risposta alla volta.",String(questionCount),"DA CHIARIRE")+'<article class="control"><p>Scegli una risposta proposta o scrivi con parole tue. Se non sai rispondere, scegli Non lo so: possiamo tornarci più avanti.</p></article>'+this.questionFileControls()+this.groupedQuestionCards()+this.requestsOverview()+this.configView(true);
     } else if (this._tab === "teach") {

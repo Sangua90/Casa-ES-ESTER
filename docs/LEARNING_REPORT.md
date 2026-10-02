@@ -33,6 +33,12 @@ conservativi: ACS dinamica e identificazione dei gruppi multisplit non sono
 ottimizzatori completi. Per un multisplit non ancora mappato, la presenza di
 heat/cool differenti provoca una sospensione prudenziale da verificare.
 Gli altri racconti restano contesto, senza generare codice o servizi eseguibili.
+Le note confermate nella categoria Altro vengono ora riconosciute per argomento
+anche senza etichette JSON, con riferimenti al file di origine nelle decisioni.
+Le stanze nominate nel testo vengono confrontate con le aree disponibili; un
+paragrafo che mescola più stanze non viene trasferito automaticamente a una sola.
+Questo riconoscimento usa termini espliciti, non un interprete generale di tutte
+le condizioni. Le note in anteprima continuano a essere escluse.
 Nessun valore di confidence viene aumentato per la sola presenza di una nota.
 
 Apri **Memoria considerata** nelle proposte per vedere i riferimenti e capire
