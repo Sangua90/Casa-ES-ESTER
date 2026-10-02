@@ -291,5 +291,4 @@ def apply_answer(data: dict, question_id: str, answer: str, now: datetime) -> di
             "created_at": now.isoformat(),
             "source": "user_answer",
         })
-        del knowledge[:-500]
     return interpretation

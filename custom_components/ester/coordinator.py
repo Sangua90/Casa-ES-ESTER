@@ -283,5 +283,6 @@ class EsterCoordinator(DataUpdateCoordinator[dict]):
                 "flexible_loads": data.get("flexible_loads", []),
                 "evaluated_at": now.isoformat()}
         result["knowledge_audit"] = knowledge_audit(data, result)
+        result["memory_protection"] = dict(self.storage.backup_status)
         result["progress"] = progress_status(data, result, now)
         return result

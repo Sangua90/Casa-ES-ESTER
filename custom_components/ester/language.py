@@ -61,7 +61,6 @@ def store_teaching_items(store: dict, teaching: dict, now: datetime) -> list[dic
                 if hint in hay and old.get("status","active")=="active":
                     old["status"]="superseded"; old["superseded_at"]=now.isoformat()
         knowledge.append(row); saved.append(row)
-    del knowledge[:-1000]
     return saved
 
 
