@@ -1,3 +1,15 @@
+## E.S.T.E.R. 1.5.2 — CORE compatto su iPhone
+
+- CORE mantiene il nucleo Jarvis, la barra di preparazione e solo le ultime due decisioni, ordinate per data.
+- Rimossi da CORE Insegna e Previsione casa; le altre pagine rimangono disponibili.
+- Schede compatte con stanza, proposta, confidence e motivazione apribile al tocco; collegamento Vedi tutte.
+- Barra sempre visibile anche in attesa della prima valutazione, con requisiti verificati e dettagli su cosa manca. Non è un conto alla rovescia alla fine dello Shadow Mode.
+- Aggiornamento delle ultime decisioni senza ricostruire il nucleo animato.
+- Versione nel collegamento del pannello per evitare di riutilizzare la grafica in cache dopo l'aggiornamento.
+- Shadow Mode permanente e protezione della memoria invariati.
+
+Aggiornare da HACS e riavviare Home Assistant.
+
 ## E.S.T.E.R. 1.5.1 — File di note e salvataggio semplice
 
 - Insegna contiene Note per E.S.T.E.R. e un modello JSON da far compilare a ChatGPT.
