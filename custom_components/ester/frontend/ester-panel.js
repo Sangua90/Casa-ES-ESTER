@@ -30,10 +30,19 @@ class EsterPanel extends HTMLElement {
   refreshDataOnly() {
     // Preserve scroll position and unsent answers during background updates.
     const progress = this.shadowRoot?.querySelector("#ester-progress");
-    if (progress) progress.innerHTML = this.progressView();
+    if (progress) {
+      const expanded = progress.querySelector("details")?.open;
+      progress.innerHTML = this.progressView();
+      if (expanded && progress.querySelector("details")) progress.querySelector("details").open = true;
+    }
     if (this._tab === "overview") {
       const decisions = this.shadowRoot?.querySelector("#core-latest");
-      if (decisions) { decisions.innerHTML = this.coreDecisionView(); decisions.querySelector("[data-tab]")?.addEventListener("click",()=>{this._tab="decisions";this.render();}); }
+      if (decisions) {
+        const expanded = new Set([...decisions.querySelectorAll(".core-decision")].filter(card=>card.querySelector("details")?.open).map(card=>card.querySelector("h3")?.textContent+card.querySelector("b")?.textContent));
+        decisions.innerHTML = this.coreDecisionView();
+        decisions.querySelectorAll(".core-decision").forEach(card=>{if (expanded.has(card.querySelector("h3")?.textContent+card.querySelector("b")?.textContent)) card.querySelector("details").open=true;});
+        decisions.querySelector("[data-tab]")?.addEventListener("click",()=>{this._tab="decisions";this.render();});
+      }
       this.startNeuralCore();
     }
     if (this._tab === "teach" && !this._fileCollection && !this._loadingCollection && !this._collectionError) this.loadFileCollection();
