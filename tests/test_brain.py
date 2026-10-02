@@ -103,6 +103,10 @@ class BrainTests(unittest.TestCase):
         experiences.remember(data, payload, NOW)
         self.assertEqual(len(data["brain_experiences"]), 1)
         self.assertEqual(experiences.similar_cases(data, decision)[0]["rating"], "correct")
+        changed = deepcopy(payload)
+        changed['evidence']['observations']['sensor.temperature']['value'] = 26
+        experiences.remember(data, changed, NOW+timedelta(minutes=5))
+        self.assertEqual(data['brain_experiences'][0]['observations']['sensor.temperature']['value'], 18)
         decision.evidence["observations"]["binary_sensor.presence"]["state"] = "off"
         self.assertEqual(experiences.similar_cases(data, decision), [])
         payload["feedback"] = {"rating": "wrong"}

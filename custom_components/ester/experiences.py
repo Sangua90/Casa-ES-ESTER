@@ -13,6 +13,11 @@ def remember(data, decision, now):
         return
     rows = data.setdefault("brain_experiences", [])
     existing = next((r for r in rows if r["decision_id"] == decision["decision_id"]), None)
+    feedback_id = (decision.get("feedback") or {}).get("feedback_id")
+    if existing and existing.get("rating") == rating and rating and existing.get("feedback_id") == feedback_id:
+        # A later cycle may reuse the same decision ID and feedback, with new observations.
+        # Those new conditions have not been validated by the person: preserve the rated case.
+        return
     if existing is None and len(rows) >= 2000:
         # Preserve validated experience; discard only an unvalidated candidate to make room.
         candidate = next((r for r in rows if not r.get("rating")), None)
@@ -23,7 +28,7 @@ def remember(data, decision, now):
     evidence = decision.get("evidence") or {}
     row.update(observations=deepcopy(evidence.get("observations", {})), modes=evidence.get("modes", []),
                target_c=evidence.get("target_c"), comfort_season=evidence.get("comfort_season"),
-               rating=rating, validation="human_feedback" if rating else "unverified_prediction",
+               rating=rating, feedback_id=feedback_id, validation="human_feedback" if rating else "unverified_prediction",
                updated_at=now.isoformat(), causal_success_measured=False)
     if existing is not None:
         existing.clear(); existing.update(row)
