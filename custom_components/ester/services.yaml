@@ -417,3 +417,7 @@ import_question_file:
       default: false
       selector:
         boolean: {}
+
+export_learning_report:
+  name: "Scarica rapporto completo"
+  description: "Esporta memoria, apprendimento, inventario, domande, feedback e risultati Shadow senza opzioni o credenziali del provider."

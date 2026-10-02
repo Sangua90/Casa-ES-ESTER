@@ -31,8 +31,11 @@ async def run_historical_replay(hass, coordinator, *, days: int = 7, step_minute
     now = dt_util.utcnow()
     start = now - timedelta(days=days)
 
+    from .knowledge_policy import prepare_profiles
+    discovered, _ = prepare_profiles(discover_entities(hass, coordinator.storage.data["classifications"]),
+                                    coordinator.storage.data.get("knowledge", []), coordinator.storage.data["classifications"])
     profiles = [
-        p for p in discover_entities(hass, coordinator.storage.data["classifications"])
+        p for p in discovered
         if p.role in REPLAY_ROLES
     ][:80]
     if not profiles:
@@ -122,6 +125,7 @@ async def run_historical_replay(hass, coordinator, *, days: int = 7, step_minute
                 data.get("hot_water_models", {}),
                 data.get("occupancy_models", {}),
                 {},
+                knowledge=data.get("knowledge", []),
             )
             if proposals:
                 decision_count += len(proposals)

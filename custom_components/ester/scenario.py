@@ -51,6 +51,7 @@ def simulate_scenario(
         data.get("flexible_loads", []), local_tz,
         data.get("ventilation_models", {}), data.get("hot_water_models", {}),
         data.get("occupancy_models", {}), data.get("energy_runtime", {}),
+        knowledge=data.get("knowledge", []),
     )
     return {
         "mode": mode,

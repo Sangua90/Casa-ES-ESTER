@@ -22,6 +22,8 @@ from .home import MODES, ROLES
 from .usage import validate_profile
 from .questions import apply_answer
 from .question_files import export_questions, preview_answers, import_answers
+from .diagnostics_report import learning_report
+from .const import VERSION
 from .language_pipeline import interpret_and_store
 from .language import store_teaching_items
 from .knowledge_files import prepare_documents, append_documents
@@ -213,10 +215,19 @@ def register_services(hass):
         await coordinator.async_request_refresh()
         return {"question_id": question_id, "status": "deferred" if interpretation["kind"] == "deferred" else "answered", "interpretation": interpretation}
 
+    async def export_learning_report(call):
+        coordinator = runtime()
+        async with coordinator.storage.lock:
+            return learning_report(coordinator.storage.data, coordinator.data or {}, VERSION,
+                                   dt_util.utcnow(), coordinator.entry.options.get("ai_provider", "disabled"))
+
     async def export_question_file(call):
         coordinator = runtime()
         async with coordinator.storage.lock:
-            return export_questions(coordinator.storage.data, (coordinator.data or {}).get("rooms", {}), dt_util.utcnow())
+            current = coordinator.data or {}
+            document = export_questions(coordinator.storage.data, current.get("rooms", {}), dt_util.utcnow())
+            document["diagnostic_context"] = {key: current.get(key) for key in ("data_suggestions", "anomalies", "knowledge_application", "progress")}
+            return document
 
     async def import_question_file(call):
         coordinator = runtime()
@@ -523,6 +534,7 @@ def register_services(hass):
         "remove_usage_profile": (remove_usage_profile, {vol.Required("profile_id"): SHORT}),
         "answer_question": (answer_question, {vol.Required("question_id"): SHORT, vol.Required("answer"): TEXT}),
         "export_question_file": (export_question_file, {}),
+        "export_learning_report": (export_learning_report, {}),
         "import_question_file": (import_question_file, {vol.Required("file_json"): vol.All(cv.string, vol.Length(min=2, max=1000000)), vol.Optional("confirm", default=False): cv.boolean}),
         "select_voice_question": (select_voice_question, {vol.Required("question_id"): SHORT}),
         "dismiss_question": (dismiss_question, {vol.Required("question_id"): SHORT}),
@@ -575,4 +587,4 @@ def register_services(hass):
     }
     for name, (handler, schema) in schemas.items():
         async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema),
-            supports_response=SupportsResponse.ONLY if name in {"export_question_file", "import_question_file", "get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "preview_knowledge_files", "confirm_teaching", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)
+            supports_response=SupportsResponse.ONLY if name in {"export_learning_report", "export_question_file", "import_question_file", "get_summary", "explain_decision", "set_usage_profile", "answer_question", "interpret_message", "preview_knowledge_files", "confirm_teaching", "export_memory", "set_flexible_load", "run_replay", "simulate_scenario", "snapshot_memory", "rollback_memory", "import_memory"} else SupportsResponse.NONE)

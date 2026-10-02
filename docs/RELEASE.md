@@ -1,3 +1,18 @@
+## E.S.T.E.R. 1.5.0 — Rapporto completo e memoria nelle valutazioni Shadow
+
+- In Apprendimento e Config: SCARICA RAPPORTO COMPLETO con memoria, inventario, modelli, campioni, domande, feedback, esiti Shadow e audit delle conoscenze.
+- Il rapporto distingue memoria salvata, contesto considerato, associazioni applicate e vincoli che hanno sospeso una proposta. Non inventa una percentuale di prontezza.
+- Usa gli identificativi energetici espliciti nelle memorie confermate solo con unità compatibili, senza ambiguità e senza sovrascrivere classificazioni manuali.
+- Sospende lo spegnimento basato sull'assenza di movimento quando la memoria segnala persone ferme o addormentate.
+- Sospende il piano ACS fisso se la memoria richiede ACS adattiva; non inventa un target. L'ottimizzatore dinamico completo resta da sviluppare.
+- Richiede verifica del gruppo multisplit quando la memoria segnala incompatibilità e sono osservate modalità heat/cool diverse.
+- Memoria considerata visibile nelle proposte; applicata anche in scenari e replay. Risposte raggruppate nel dominio corretto in Insegna.
+- CORE e Apprendimento mostrano una barra dei requisiti verificati con elenco di ciò che manca, qualità dei feedback separata ed efficienza reale non ancora misurabile. Nessuna attivazione automatica.
+- Operazioni quotidiane in Domande e richieste e Insegna; simulazioni nei dettagli tecnici.
+- Shadow Mode permanente: nessuna attuazione, nessun invio AI nell'esportazione.
+
+Guida: docs/LEARNING_REPORT.md. Aggiornare da HACS, riavviare Home Assistant e ricaricare il pannello.
+
 ## E.S.T.E.R. 1.4.9 — Raccolta file e salvataggio visibile
 
 - CARICA conserva subito i documenti in Home Assistant; il 100% appare solo dopo la conferma del backend.
